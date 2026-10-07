@@ -7,6 +7,7 @@ const imageInput = document.getElementById('imageInput');
 const imagePreview = document.getElementById('imagePreview');
 const thinkBtn = document.getElementById('thinkBtn');
 const thinkPopover = document.getElementById('thinkPopover');
+const thinkSwitch = document.getElementById('thinkSwitch');
 
 let messages = [];
 let pendingImage = null;
@@ -87,6 +88,7 @@ function addAssistantActions(row,content,elapsedMs,usedThink){
   source.addEventListener('click',()=>{row.querySelectorAll('.sources-popover').forEach(e=>e.remove());if(!urls.length)return;const pop=document.createElement('div');pop.className='sources-popover';pop.innerHTML=`<div class="sources-title">Sources</div>${urls.map(u=>`<a href="${escapeAttr(safeUrl(u))}" target="_blank" rel="noopener noreferrer">${escapeHtml(u)}</a>`).join('')}`;row.appendChild(pop);requestAnimationFrame(()=>pop.classList.add('open'));});
   const meta=document.createElement('div');meta.className='answer-meta';const seconds=(elapsedMs/1000).toFixed(1);meta.textContent=`Generated for ${seconds}s${usedThink?' · Think Harder':''}`;row.querySelector('.answer').prepend(meta);
   wrap.append(copy,like,dislike,share,source);row.appendChild(wrap);
+  const disclaimer=document.createElement('div');disclaimer.className='answer-disclaimer';disclaimer.textContent='ZennNyx AI can make mistakes. Check important information.';row.appendChild(disclaimer);
   row.querySelectorAll('.code-copy').forEach(b=>b.addEventListener('click',()=>copyText(decodeURIComponent(b.dataset.copyCode||''),b)));
 }
 function addMessage(role,content,isError=false,elapsedMs=0,usedThink=false,imageData=null){
@@ -100,8 +102,26 @@ function addTyping(){const row=document.createElement('div');row.id='typing';row
 function removeTyping(){document.getElementById('typing')?.remove();}
 function resizeInput(){input.style.height='auto';input.style.height=Math.min(Math.max(input.scrollHeight,42),180)+'px';}
 function closeKeyboard(){input.blur();document.activeElement?.blur?.();}
-function updateThinkMode(){thinkBtn.setAttribute('aria-pressed',String(thinkHarder));thinkBtn.classList.toggle('active',thinkHarder);thinkBtn.classList.remove('pulse');void thinkBtn.offsetWidth;thinkBtn.classList.add('pulse');}
-function toggleThinkPopover(force){const open=force??thinkPopover.hidden;thinkPopover.hidden=!open;if(open){requestAnimationFrame(()=>thinkPopover.classList.add('open'));setTimeout(()=>{if(!thinkPopover.hidden)thinkPopover.classList.add('open')},0)}else thinkPopover.classList.remove('open');}
+function updateThinkMode(animate=false){
+  thinkBtn.setAttribute('aria-pressed',String(thinkHarder));
+  thinkBtn.classList.toggle('active',thinkHarder);
+  thinkSwitch.setAttribute('aria-checked',String(thinkHarder));
+  if(animate){thinkBtn.classList.remove('pulse');void thinkBtn.offsetWidth;thinkBtn.classList.add('pulse');}
+}
+function toggleThinkPopover(open){
+  if(open){
+    thinkPopover.hidden=false;
+    requestAnimationFrame(()=>thinkPopover.classList.add('open'));
+  }else{
+    thinkPopover.classList.remove('open');
+    setTimeout(()=>{if(!thinkPopover.classList.contains('open'))thinkPopover.hidden=true},160);
+  }
+}
+function setThinkHarder(value){
+  thinkHarder=Boolean(value);
+  updateThinkMode(true);
+  toggleThinkPopover(false);
+}
 function showImagePreview(dataUrl){pendingImage=dataUrl;imagePreview.hidden=false;imagePreview.innerHTML=`<img src="${dataUrl}" alt="Selected image"><button type="button" id="removeImage" aria-label="Remove image">×</button>`;document.getElementById('removeImage').addEventListener('click',clearImage);}
 function clearImage(){pendingImage=null;imageInput.value='';imagePreview.hidden=true;imagePreview.innerHTML='';}
 async function prepareImage(file){
@@ -148,7 +168,8 @@ async function sendMessage(){
 }
 function updateSendState(){sendBtn.disabled=busy||(!input.value.trim()&&!pendingImage);}
 composer.addEventListener('submit',e=>{e.preventDefault();sendMessage();});
-thinkBtn.addEventListener('click',()=>{if(busy)return;thinkHarder=!thinkHarder;updateThinkMode();toggleThinkPopover(true);clearTimeout(thinkBtn._hide);thinkBtn._hide=setTimeout(()=>toggleThinkPopover(false),3200);});
+thinkBtn.addEventListener('click',()=>{if(busy)return;toggleThinkPopover(true);});
+thinkSwitch.addEventListener('click',()=>{if(busy)return;setThinkHarder(!thinkHarder);});
 attachBtn.addEventListener('click',()=>{if(!busy)imageInput.click();});
 imageInput.addEventListener('change',()=>prepareImage(imageInput.files?.[0]));
 input.addEventListener('input',()=>{resizeInput();updateSendState();});
@@ -156,4 +177,4 @@ input.addEventListener('keydown',e=>{if(e.key==='Enter'){/* Enter always inserts
 input.addEventListener('paste',e=>{const item=[...(e.clipboardData?.items||[])].find(x=>x.type.startsWith('image/'));if(item&&!busy){const file=item.getAsFile();if(file){e.preventDefault();prepareImage(file);}}});
 document.addEventListener('click',e=>{if(!e.target.closest('.think-area'))toggleThinkPopover(false);if(!e.target.closest('.sources-popover')&&!e.target.closest('[aria-label="Sources"]'))document.querySelectorAll('.sources-popover').forEach(el=>el.remove());});
 function bindSuggestions(){document.querySelectorAll('[data-prompt]').forEach(btn=>btn.addEventListener('click',()=>{input.value=btn.dataset.prompt;resizeInput();updateSendState();input.focus();}));}
-bindSuggestions();updateThinkMode();resizeInput();updateSendState();
+bindSuggestions();updateThinkMode(false);resizeInput();updateSendState();
