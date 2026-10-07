@@ -1,0 +1,9 @@
+{
+  "name": "zennnyx-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ZennNyx AI - minimal AI chat",
+  "scripts": {"dev": "vercel dev"},
+  "dependencies": {},
+  "devDependencies": {"vercel": "latest"}
+}
