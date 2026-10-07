@@ -2,169 +2,158 @@ const chat = document.getElementById('chat');
 const composer = document.getElementById('composer');
 const input = document.getElementById('input');
 const sendBtn = document.getElementById('sendBtn');
-const thinkBtn = document.getElementById('thinkBtn');
-const modeHint = document.getElementById('modeHint');
 const attachBtn = document.getElementById('attachBtn');
 const imageInput = document.getElementById('imageInput');
 const imagePreview = document.getElementById('imagePreview');
+const thinkBtn = document.getElementById('thinkBtn');
+const thinkPopover = document.getElementById('thinkPopover');
 
 let messages = [];
-let busy = false;
-let thinkHarder = false;
 let pendingImage = null;
+let thinkHarder = false;
+let busy = false;
+let toastTimer = null;
 
-const icon = {
-  copy: '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M5 16V6a2 2 0 0 1 2-2h10"></path></svg>',
-  like: '<svg viewBox="0 0 24 24"><path d="M7 10v10H4V10h3Zm0 0 5-7c1.5 0 2.3 1.2 1.9 2.5L13 10h5.5a2 2 0 0 1 2 2l-1 6.2A2 2 0 0 1 17.5 20H7"></path></svg>',
-  dislike: '<svg viewBox="0 0 24 24"><path d="M17 14V4h3v10h-3Zm0 0-5 7c-1.5 0-2.3-1.2-1.9-2.5L11 14H5.5a2 2 0 0 1-2-2l1-6.2A2 2 0 0 1 5.5 4H17"></path></svg>',
-  share: '<svg viewBox="0 0 24 24"><path d="M12 15V3m0 0-4 4m4-4 4 4"></path><path d="M5 11v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"></path></svg>',
-  source: '<svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"></path><path d="M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1"></path></svg>'
+const icons = {
+  copy: '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M5 16V5a2 2 0 0 1 2-2h9"></path></svg>',
+  like: '<svg viewBox="0 0 24 24"><path d="M7 10v11H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3Z"></path><path d="M7 21h9.5a2 2 0 0 0 1.9-1.4l2.2-6.5A2 2 0 0 0 18.7 10H14l.7-4.1A3.3 3.3 0 0 0 11.5 2L7 10"></path></svg>',
+  dislike: '<svg viewBox="0 0 24 24"><path d="M7 14V3H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3Z"></path><path d="M7 3h9.5a2 2 0 0 1 1.9 1.4l2.2 6.5A2 2 0 0 1 18.7 14H14l.7 4.1A3.3 3.3 0 0 1 11.5 22L7 14"></path></svg>',
+  share: '<svg viewBox="0 0 24 24"><path d="M12 16V3"></path><path d="m7 8 5-5 5 5"></path><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"></path></svg>',
+  link: '<svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"></path><path d="M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 7 20l1.1-1.1"></path></svg>'
 };
 
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>'"]/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[ch]));
+function escapeHtml(value='') {
+  return String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 }
-
-function renderInline(source) {
-  let text = escapeHtml(source);
-  text = text.replace(/&lt;br\s*\/?&gt;/gi, '<br>');
-  text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-  text = text.replace(/(^|\s)(https?:\/\/[^\s<]+)/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
-  text = text.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
-  text = text.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
-  text = text.replace(/__([^_\n]+)__/g, '<strong>$1</strong>');
-  text = text.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
-  text = text.replace(/(?<![*\w])\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
-  text = text.replace(/(?<![_\w])_([^_\n]+)_(?!_)/g, '<em>$1</em>');
-  return text;
+function escapeAttr(value=''){return escapeHtml(value).replace(/`/g,'&#96;');}
+function safeUrl(value='') {
+  try { const u = new URL(value); return ['http:','https:'].includes(u.protocol) ? u.href : '#'; } catch { return '#'; }
 }
-
-function splitTableRow(row) {
-  let clean = row.trim();
-  if (clean.startsWith('|')) clean = clean.slice(1);
-  if (clean.endsWith('|')) clean = clean.slice(0, -1);
-  return clean.split(/(?<!\\)\|/).map(cell => cell.replace(/\\\|/g, '|').trim());
+function renderInline(text) {
+  let s = escapeHtml(text);
+  s = s.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
+  s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/__(.+?)__/g, '<strong>$1</strong>');
+  s = s.replace(/~~(.+?)~~/g, '<del>$1</del>');
+  s = s.replace(/(^|[\s(])(https?:\/\/[^\s<]+)/g, (m,p,url) => `${p}<a href="${escapeAttr(safeUrl(url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`);
+  s = s.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+  s = s.replace(/_([^_\n]+)_/g, '<em>$1</em>');
+  return s;
 }
-
-function parseTable(lines, startIndex) {
-  if (startIndex + 1 >= lines.length) return null;
-  const header = lines[startIndex];
-  const separator = lines[startIndex + 1];
-  if (!header.includes('|')) return null;
-  if (!/^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(separator)) return null;
-
-  const headers = splitTableRow(header);
-  const alignments = splitTableRow(separator).map(cell => {
-    const left = cell.startsWith(':'); const right = cell.endsWith(':');
-    return left && right ? 'center' : right ? 'right' : left ? 'left' : '';
-  });
-  const rows = [];
-  let i = startIndex + 2;
-  while (i < lines.length && lines[i].trim() && lines[i].includes('|')) { rows.push(splitTableRow(lines[i])); i++; }
-
-  const attr = idx => alignments[idx] ? ` style="text-align:${alignments[idx]}"` : '';
-  const ths = headers.map((c, idx) => `<th${attr(idx)}>${renderInline(c)}</th>`).join('');
-  const body = rows.map(row => `<tr>${headers.map((_, idx) => `<td${attr(idx)}>${renderInline(row[idx] ?? '')}</td>`).join('')}</tr>`).join('');
-  return { html:`<div class="table-wrap"><table><thead><tr>${ths}</tr></thead><tbody>${body}</tbody></table></div>`, nextIndex:i };
+function parseTable(lines) {
+  if (lines.length < 2 || !/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[1])) return null;
+  const split = line => line.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(x=>x.trim());
+  const head = split(lines[0]);
+  const body = lines.slice(2).map(split).filter(r=>r.length);
+  const cols = head.length;
+  const norm = row => Array.from({length:cols},(_,i)=>row[i]??'');
+  return `<div class="table-wrap"><table><thead><tr>${norm(head).map(c=>`<th>${renderInline(c)}</th>`).join('')}</tr></thead><tbody>${body.map(r=>`<tr>${norm(r).map(c=>`<td>${renderInline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
 }
-
-function renderMarkdown(source) {
-  const lines = String(source ?? '').replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
-  const out = []; let paragraph=[]; let listType=null; let listItems=[]; let quote=[];
-  const flushP=()=>{ if(paragraph.length){ out.push(`<p>${renderInline(paragraph.join('\n')).replace(/\n/g,'<br>')}</p>`); paragraph=[]; } };
-  const flushL=()=>{ if(listItems.length){ const tag=listType==='ol'?'ol':'ul'; out.push(`<${tag}>${listItems.map(x=>`<li>${renderInline(x)}</li>`).join('')}</${tag}>`); listItems=[]; listType=null; } };
-  const flushQ=()=>{ if(quote.length){ out.push(`<blockquote>${quote.map(x=>renderInline(x)).join('<br>')}</blockquote>`); quote=[]; } };
-
-  for(let i=0;i<lines.length;){
-    const line=lines[i], t=line.trim();
-    const fence=t.match(/^```([\w.+#-]*)\s*$/);
-    if(fence){ flushP();flushL();flushQ(); const lang=fence[1], code=[]; i++; while(i<lines.length&&!/^```\s*$/.test(lines[i].trim())) code.push(lines[i++]); if(i<lines.length)i++; out.push(`<div class="code-wrap"><pre class="code-block" data-lang="${escapeHtml(lang)}"><code>${escapeHtml(code.join('\n'))}</code></pre><button class="code-copy" type="button" data-copy-code="${encodeURIComponent(code.join('\n'))}">Copy</button></div>`); continue; }
-    const table=parseTable(lines,i); if(table){flushP();flushL();flushQ();out.push(table.html);i=table.nextIndex;continue;}
-    if(/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line)){flushP();flushL();flushQ();out.push('<hr>');i++;continue;}
-    const h=t.match(/^(#{1,6})\s+(.+)$/); if(h){flushP();flushL();flushQ();out.push(`<h${h[1].length}>${renderInline(h[2])}</h${h[1].length}>`);i++;continue;}
-    const q=line.match(/^\s*>\s?(.*)$/); if(q){flushP();flushL();quote.push(q[1]);i++;continue;}
-    const ol=line.match(/^\s*\d+[.)]\s+(.+)$/), ul=line.match(/^\s*[-*+]\s+(.+)$/); if(ol||ul){flushP();flushQ();const nt=ol?'ol':'ul';if(listType&&listType!==nt)flushL();listType=nt;listItems.push((ol||ul)[1]);i++;continue;}
-    if(!t){flushP();flushL();flushQ();i++;continue;}
-    flushL();flushQ();paragraph.push(line);i++;
+function renderMarkdown(md='') {
+  const lines = String(md).replace(/\r/g,'').split('\n');
+  let html='',i=0;
+  while(i<lines.length){
+    const line=lines[i];
+    if(!line.trim()){i++;continue;}
+    if(/^```/.test(line.trim())){
+      const lang=line.trim().slice(3).trim();let j=i+1;while(j<lines.length&&!/^```/.test(lines[j].trim()))j++;
+      const code=lines.slice(i+1,j).join('\n');const encoded=encodeURIComponent(code);
+      html+=`<div class="code-wrap"><pre class="code-block"><code>${escapeHtml(code)}</code></pre><button class="code-copy" type="button" data-copy-code="${encoded}" aria-label="Copy code">Copy</button></div>`;i=j+1;continue;
+    }
+    if(i+1<lines.length && lines[i].includes('|')){
+      const table=parseTable(lines.slice(i));if(table){const count=lines.slice(i+2).findIndex(x=>!x.includes('|')&&!/^\s*$/.test(x));const consumed=count<0?lines.length-i:count+2;html+=table;i+=consumed;continue;}
+    }
+    const heading=line.match(/^(#{1,4})\s+(.+)$/);if(heading){html+=`<h${heading[1].length}>${renderInline(heading[2])}</h${heading[1].length}>`;i++;continue;}
+    if(/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line)){html+='<hr>';i++;continue;}
+    if(/^>\s?/.test(line)){const q=[];while(i<lines.length&&/^>\s?/.test(lines[i])){q.push(lines[i].replace(/^>\s?/,'').trim());i++;}html+=`<blockquote>${q.map(renderInline).join('<br>')}</blockquote>`;continue;}
+    if(/^\s*[-*+]\s+/.test(line)){const items=[];while(i<lines.length&&/^\s*[-*+]\s+/.test(lines[i])){items.push(lines[i].replace(/^\s*[-*+]\s+/,''));i++;}html+=`<ul>${items.map(x=>`<li>${renderInline(x)}</li>`).join('')}</ul>`;continue;}
+    if(/^\s*\d+[.)]\s+/.test(line)){const items=[];while(i<lines.length&&/^\s*\d+[.)]\s+/.test(lines[i])){items.push(lines[i].replace(/^\s*\d+[.)]\s+/,''));i++;}html+=`<ol>${items.map(x=>`<li>${renderInline(x)}</li>`).join('')}</ol>`;continue;}
+    const para=[line.trim()];i++;while(i<lines.length&&lines[i].trim()&&!/^```/.test(lines[i].trim())&&!/^#{1,4}\s+/.test(lines[i])&&!/^\s*[-*+]\s+/.test(lines[i])&&!/^\s*\d+[.)]\s+/.test(lines[i])&&!/^>\s?/.test(lines[i])){para.push(lines[i].trim());i++;}html+=`<p>${para.map(renderInline).join('<br>')}</p>`;
   }
-  flushP();flushL();flushQ(); return `<div class="markdown">${out.join('')}</div>`;
+  return `<div class="markdown">${html||'<p></p>'}</div>`;
 }
-
-function extractSources(text){ const urls=String(text??'').match(/https?:\/\/[^\s)< >\]]+/g)||[]; return [...new Set(urls.map(u=>u.replace(/[.,;]+$/,'')))]; }
-function formatDuration(ms){ return `${(ms/1000).toFixed(ms<10000?1:0)}s`; }
-
-async function copyText(text, button){
-  try{ await navigator.clipboard.writeText(text); const old=button.querySelector('.action-label')?.textContent || 'Copy'; if(button.querySelector('.action-label')) button.querySelector('.action-label').textContent='Copied'; setTimeout(()=>{if(button.querySelector('.action-label'))button.querySelector('.action-label').textContent=old;},1100); }
-  catch{ }
-}
-function actionButton(label, svg){ const b=document.createElement('button'); b.type='button';b.className='action-btn';b.setAttribute('aria-label',label);b.innerHTML=`<span class="action-icon">${svg}</span><span class="action-label">${label}</span>`;return b; }
-
-function addAssistantActions(row, content, elapsedMs, usedThink){
-  const meta=document.createElement('div');meta.className='answer-meta';meta.textContent=`Generated for ${formatDuration(elapsedMs)}${usedThink?' · Think Harder':''}`;row.insertBefore(meta,row.firstChild);
+function iconButton(label,icon,extra=''){return `<button type="button" class="action-btn ${extra}" aria-label="${label}"><span class="action-icon">${icon}</span><span class="action-label">${label}</span></button>`;}
+function showToast(text){let t=document.querySelector('.toast');if(!t){t=document.createElement('div');t.className='toast';document.body.appendChild(t);}t.textContent=text;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),1500);}
+async function copyText(text,button){try{await navigator.clipboard.writeText(text);if(button){const label=button.querySelector('.action-label');if(label){const old=label.textContent;label.textContent='Copied';button.classList.add('selected');setTimeout(()=>{label.textContent=old;button.classList.remove('selected')},1100);}}else showToast('Copied');}catch{showToast('Could not copy');}}
+function extractUrls(text){return [...new Set((String(text).match(/https?:\/\/[^\s)\]}>]+/g)||[]).map(u=>u.replace(/[.,;:]+$/,'')))].slice(0,12);}
+function addAssistantActions(row,content,elapsedMs,usedThink){
   const wrap=document.createElement('div');wrap.className='assistant-actions';
-  const copy=actionButton('Copy',icon.copy);copy.addEventListener('click',()=>copyText(content,copy));
-  const like=actionButton('Like',icon.like), dislike=actionButton('Dislike',icon.dislike);
-  like.addEventListener('click',()=>{like.classList.toggle('selected');dislike.classList.remove('selected');});
-  dislike.addEventListener('click',()=>{dislike.classList.toggle('selected');like.classList.remove('selected');});
-  const share=actionButton('Share',icon.share);share.addEventListener('click',async()=>{try{if(navigator.share)await navigator.share({title:'ZennNyx AI',text:content});else await copyText(content,share);}catch{}});
-  const source=actionButton('Sources',icon.source);const urls=extractSources(content);if(!urls.length)source.classList.add('disabled');
-  source.addEventListener('click',()=>{document.querySelectorAll('.sources-popover').forEach(e=>e.remove());if(!urls.length)return;const pop=document.createElement('div');pop.className='sources-popover';pop.innerHTML=`<div class="sources-title">Sources</div>${urls.map(u=>`<a href="${escapeHtml(u)}" target="_blank" rel="noopener noreferrer">${escapeHtml(u)}</a>`).join('')}`;row.appendChild(pop);requestAnimationFrame(()=>pop.classList.add('open'));});
+  const copy=document.createElement('button');copy.type='button';copy.className='action-btn';copy.setAttribute('aria-label','Copy');copy.innerHTML=`<span class="action-icon">${icons.copy}</span><span class="action-label">Copy</span>`;copy.addEventListener('click',()=>copyText(content,copy));
+  const like=document.createElement('button');like.type='button';like.className='action-btn';like.setAttribute('aria-label','Like');like.innerHTML=`<span class="action-icon">${icons.like}</span>`;
+  const dislike=document.createElement('button');dislike.type='button';dislike.className='action-btn';dislike.setAttribute('aria-label','Dislike');dislike.innerHTML=`<span class="action-icon">${icons.dislike}</span>`;
+  like.addEventListener('click',()=>{like.classList.toggle('selected');dislike.classList.remove('selected');});dislike.addEventListener('click',()=>{dislike.classList.toggle('selected');like.classList.remove('selected');});
+  const share=document.createElement('button');share.type='button';share.className='action-btn';share.setAttribute('aria-label','Share');share.innerHTML=`<span class="action-icon">${icons.share}</span>`;share.addEventListener('click',async()=>{try{if(navigator.share){await navigator.share({title:'ZennNyx AI',text:content.slice(0,1500)});}else await copyText(content); }catch{}});
+  const urls=extractUrls(content);const source=document.createElement('button');source.type='button';source.className=`action-btn ${urls.length?'':'disabled'}`;source.setAttribute('aria-label','Sources');source.innerHTML=`<span class="action-icon">${icons.link}</span>`;source.disabled=!urls.length;
+  source.addEventListener('click',()=>{row.querySelectorAll('.sources-popover').forEach(e=>e.remove());if(!urls.length)return;const pop=document.createElement('div');pop.className='sources-popover';pop.innerHTML=`<div class="sources-title">Sources</div>${urls.map(u=>`<a href="${escapeAttr(safeUrl(u))}" target="_blank" rel="noopener noreferrer">${escapeHtml(u)}</a>`).join('')}`;row.appendChild(pop);requestAnimationFrame(()=>pop.classList.add('open'));});
+  const meta=document.createElement('div');meta.className='answer-meta';const seconds=(elapsedMs/1000).toFixed(1);meta.textContent=`Generated for ${seconds}s${usedThink?' · Think Harder':''}`;row.querySelector('.answer').prepend(meta);
   wrap.append(copy,like,dislike,share,source);row.appendChild(wrap);
   row.querySelectorAll('.code-copy').forEach(b=>b.addEventListener('click',()=>copyText(decodeURIComponent(b.dataset.copyCode||''),b)));
 }
-
-function addMessage(role, content, isError=false, elapsedMs=0, usedThink=false, imageData=null){
+function addMessage(role,content,isError=false,elapsedMs=0,usedThink=false,imageData=null){
   const row=document.createElement('div');row.className=`message ${role}${isError?' error':''}`;row.classList.add(role==='assistant'?'assistant-enter':'message-enter');
   const contentEl=document.createElement('div');contentEl.className=role==='assistant'?'answer':'bubble';
-  if(role==='assistant'&&!isError)contentEl.innerHTML=renderMarkdown(content);else contentEl.textContent=content;
+  if(role==='assistant'&&!isError)contentEl.innerHTML=renderMarkdown(content);else contentEl.innerHTML=isError?`<strong>${escapeHtml(content)}</strong>`:escapeHtml(content).replace(/\n/g,'<br>');
   if(role==='user'&&imageData){const img=document.createElement('img');img.className='message-image';img.src=imageData;img.alt='Attached image';contentEl.prepend(img);}
-  row.appendChild(contentEl);chat.appendChild(row);
-  if(role==='assistant'&&!isError)addAssistantActions(row,content,elapsedMs,usedThink);
-  return row;
+  row.appendChild(contentEl);chat.appendChild(row);if(role==='assistant'&&!isError)addAssistantActions(row,content,elapsedMs,usedThink);return row;
 }
 function addTyping(){const row=document.createElement('div');row.id='typing';row.className='message assistant responding';row.innerHTML='<div class="answer typing"><span></span><span></span><span></span></div>';chat.appendChild(row);}
 function removeTyping(){document.getElementById('typing')?.remove();}
-function resizeInput(){input.style.height='auto';input.style.height=Math.min(input.scrollHeight,180)+'px';}
+function resizeInput(){input.style.height='auto';input.style.height=Math.min(Math.max(input.scrollHeight,42),180)+'px';}
 function closeKeyboard(){input.blur();document.activeElement?.blur?.();}
-function updateThinkMode(){thinkBtn.setAttribute('aria-pressed',String(thinkHarder));thinkBtn.classList.toggle('active',thinkHarder);thinkBtn.classList.remove('toggle-pulse');void thinkBtn.offsetWidth;thinkBtn.classList.add('toggle-pulse');modeHint.textContent=thinkHarder?'Structured, deeper answers':'Short, direct answers';}
-
+function updateThinkMode(){thinkBtn.setAttribute('aria-pressed',String(thinkHarder));thinkBtn.classList.toggle('active',thinkHarder);thinkBtn.classList.remove('pulse');void thinkBtn.offsetWidth;thinkBtn.classList.add('pulse');}
+function toggleThinkPopover(force){const open=force??thinkPopover.hidden;thinkPopover.hidden=!open;if(open){requestAnimationFrame(()=>thinkPopover.classList.add('open'));setTimeout(()=>{if(!thinkPopover.hidden)thinkPopover.classList.add('open')},0)}else thinkPopover.classList.remove('open');}
 function showImagePreview(dataUrl){pendingImage=dataUrl;imagePreview.hidden=false;imagePreview.innerHTML=`<img src="${dataUrl}" alt="Selected image"><button type="button" id="removeImage" aria-label="Remove image">×</button>`;document.getElementById('removeImage').addEventListener('click',clearImage);}
 function clearImage(){pendingImage=null;imageInput.value='';imagePreview.hidden=true;imagePreview.innerHTML='';}
 async function prepareImage(file){
   if(!file||!file.type.startsWith('image/'))return;
-  if(file.size>12*1024*1024){alert('Image is too large. Please choose an image under 12 MB.');return;}
-  const src=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file);});
-  const img=await new Promise((resolve,reject)=>{const i=new Image();i.onload=()=>resolve(i);i.onerror=reject;i.src=src;});
-  const max=1600, scale=Math.min(1,max/Math.max(img.width,img.height));
-  const c=document.createElement('canvas');c.width=Math.max(1,Math.round(img.width*scale));c.height=Math.max(1,Math.round(img.height*scale));c.getContext('2d').drawImage(img,0,0,c.width,c.height);
-  const out=c.toDataURL('image/jpeg',0.82);showImagePreview(out);
+  if(file.size>12*1024*1024){showToast('Image too large (max 12 MB)');return;}
+  try{
+    const src=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file);});
+    const img=await new Promise((resolve,reject)=>{const i=new Image();i.onload=()=>resolve(i);i.onerror=reject;i.src=src;});
+    const max=1600,scale=Math.min(1,max/Math.max(img.width,img.height));const c=document.createElement('canvas');c.width=Math.max(1,Math.round(img.width*scale));c.height=Math.max(1,Math.round(img.height*scale));c.getContext('2d').drawImage(img,0,0,c.width,c.height);showImagePreview(c.toDataURL('image/jpeg',.82));
+  }catch{showToast('Could not read that image');}
 }
-
+function normalizeError(status,data){
+  if(status===413)return 'Pesan atau gambar terlalu besar. Coba kirim versi yang lebih kecil.';
+  if(status===429)return 'ZennNyx sedang terlalu sibuk. Coba kirim lagi sebentar lagi.';
+  if(status>=500)return 'Maaf, ZennNyx sedang mengalami kendala. Coba kirim lagi.';
+  return data?.error||'Maaf, pesan ini belum bisa diproses. Coba kirim lagi.';
+}
+function prepareHistoryForRequest(){
+  const copy=messages.map(m=>({role:m.role,content:m.content}));
+  // Keep only the newest image-bearing user turn. Older image payloads are unnecessary and expensive.
+  let newestImageIndex=-1;
+  for(let i=copy.length-1;i>=0;i--){if(copy[i].role==='user'&&Array.isArray(copy[i].content)&&copy[i].content.some(p=>p?.type==='image_url')){newestImageIndex=i;break;}}
+  return copy.map((m,i)=>{
+    if(m.role!=='user'||!Array.isArray(m.content))return m;
+    if(i===newestImageIndex)return m;
+    const textPart=m.content.find(p=>p?.type==='text'&&typeof p.text==='string');
+    return {role:'user',content:textPart?.text||'User sent an image.'};
+  });
+}
 async function sendMessage(){
   const text=input.value.trim();if((!text&&!pendingImage)||busy)return;
-  busy=true;sendBtn.disabled=true;thinkBtn.disabled=true;attachBtn.disabled=true;document.getElementById('welcome')?.remove();
-  const imageForMessage=pendingImage;
-  const userContent=imageForMessage?[{type:'text',text:text||'Please analyze this image.'},{type:'image_url',image_url:{url:imageForMessage}}]:text;
-  addMessage('user',text||'Analyze this image.',false,0,false,imageForMessage);
-  messages.push({role:'user',content:userContent});
+  busy=true;sendBtn.disabled=true;thinkBtn.disabled=true;attachBtn.disabled=true;document.getElementById('welcome')?.remove();toggleThinkPopover(false);
+  const imageForMessage=pendingImage;const userContent=imageForMessage?[{type:'text',text:text||'Please analyze this image.'},{type:'image_url',image_url:{url:imageForMessage}}]:text;
+  addMessage('user',text||'Analyze this image.',false,0,false,imageForMessage);messages.push({role:'user',content:userContent});
   input.value='';resizeInput();clearImage();closeKeyboard();addTyping();
   const started=performance.now();
   try{
-    const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages,thinkHarder})});
-    const data=await response.json().catch(()=>({}));removeTyping();if(!response.ok)throw new Error(data.error||`Request failed (${response.status})`);
-    const reply=data.reply||'No response received.';const elapsed=performance.now()-started;addMessage('assistant',reply,false,elapsed,Boolean(data.thinkHarder));messages.push({role:'assistant',content:reply});
-    // Do not keep large image data in every subsequent request. The current image is only sent once.
-    if(messages.length>12)messages=messages.slice(-12);
-  }catch(error){removeTyping();addMessage('assistant',`Error: ${error.message}`,true);messages.pop();}
-  finally{busy=false;sendBtn.disabled=false;thinkBtn.disabled=false;attachBtn.disabled=false;}
+    const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:prepareHistoryForRequest(),thinkHarder})});
+    const data=await response.json().catch(()=>({}));removeTyping();if(!response.ok)throw new Error(normalizeError(response.status,data));
+    const reply=data.reply||'Maaf, ZennNyx tidak menerima jawaban.';const elapsed=performance.now()-started;addMessage('assistant',reply,false,elapsed,Boolean(data.thinkHarder));messages.push({role:'assistant',content:reply});
+    if(messages.length>14)messages=messages.slice(-14);
+  }catch(error){removeTyping();addMessage('assistant',error.message||'Maaf, terjadi kendala.',true);messages.pop();}
+  finally{busy=false;sendBtn.disabled=false;thinkBtn.disabled=false;attachBtn.disabled=false;updateSendState();}
 }
-
+function updateSendState(){sendBtn.disabled=busy||(!input.value.trim()&&!pendingImage);}
 composer.addEventListener('submit',e=>{e.preventDefault();sendMessage();});
-thinkBtn.addEventListener('click',()=>{if(busy)return;thinkHarder=!thinkHarder;updateThinkMode();});
+thinkBtn.addEventListener('click',()=>{if(busy)return;thinkHarder=!thinkHarder;updateThinkMode();toggleThinkPopover(true);clearTimeout(thinkBtn._hide);thinkBtn._hide=setTimeout(()=>toggleThinkPopover(false),3200);});
 attachBtn.addEventListener('click',()=>{if(!busy)imageInput.click();});
 imageInput.addEventListener('change',()=>prepareImage(imageInput.files?.[0]));
-input.addEventListener('input',resizeInput);
-input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}});
-document.addEventListener('click',e=>{if(!e.target.closest('.sources-popover')&&!e.target.closest('[aria-label="Sources"]'))document.querySelectorAll('.sources-popover').forEach(el=>el.remove());});
-function bindSuggestions(){document.querySelectorAll('[data-prompt]').forEach(btn=>btn.addEventListener('click',()=>{input.value=btn.dataset.prompt;resizeInput();input.focus();}));}
-bindSuggestions();updateThinkMode();resizeInput();
+input.addEventListener('input',()=>{resizeInput();updateSendState();});
+input.addEventListener('keydown',e=>{if(e.key==='Enter'){/* Enter always inserts a newline; sending is button-only. */if(e.isComposing)return;requestAnimationFrame(resizeInput);}});
+input.addEventListener('paste',e=>{const item=[...(e.clipboardData?.items||[])].find(x=>x.type.startsWith('image/'));if(item&&!busy){const file=item.getAsFile();if(file){e.preventDefault();prepareImage(file);}}});
+document.addEventListener('click',e=>{if(!e.target.closest('.think-area'))toggleThinkPopover(false);if(!e.target.closest('.sources-popover')&&!e.target.closest('[aria-label="Sources"]'))document.querySelectorAll('.sources-popover').forEach(el=>el.remove());});
+function bindSuggestions(){document.querySelectorAll('[data-prompt]').forEach(btn=>btn.addEventListener('click',()=>{input.value=btn.dataset.prompt;resizeInput();updateSendState();input.focus();}));}
+bindSuggestions();updateThinkMode();resizeInput();updateSendState();

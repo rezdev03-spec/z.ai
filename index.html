@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="id">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -11,8 +11,9 @@
 <body>
   <main class="app">
     <header class="topbar" aria-label="ZennNyx AI header">
+      <div class="header-fade" aria-hidden="true"></div>
       <div class="brand-title">ZennNyx 1.0 Flash</div>
-      <div class="brand-meta"><span class="status-dot"></span><span>AI ASSISTANT</span><span>·</span><span>GROQ</span></div>
+      <div class="brand-meta"><span class="status-dot"></span><span>AI ASSISTANT</span></div>
     </header>
 
     <section id="chat" class="chat" aria-live="polite">
@@ -30,19 +31,31 @@
 
     <div class="composer-wrap">
       <div id="imagePreview" class="image-preview" hidden></div>
-      <div class="mode-row">
-        <button id="thinkBtn" class="think-toggle" type="button" aria-pressed="false">
-          <span class="think-icon">✦</span><span>Think Harder</span>
-        </button>
-        <span id="modeHint" class="mode-hint">Short, direct answers</span>
+
+      <div class="composer-shell">
+        <form id="composer" class="composer">
+          <div class="composer-row">
+            <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
+            <button id="attachBtn" class="icon-btn attach-btn" type="button" aria-label="Attach image" title="Attach image">+</button>
+            <textarea id="input" rows="1" maxlength="8000" placeholder="Message ZennNyx AI..." autocomplete="off" enterkeyhint="enter" spellcheck="true"></textarea>
+          </div>
+          <div class="composer-footer">
+            <div class="think-area">
+              <button id="thinkBtn" class="think-toggle" type="button" aria-pressed="false" aria-describedby="thinkPopover">
+                <span class="think-icon">✦</span><span>Think Harder</span>
+              </button>
+              <div id="thinkPopover" class="think-popover" role="tooltip" hidden>
+                <div class="think-popover-title">Think Harder</div>
+                <div>Jawaban lebih terstruktur dan mendalam untuk analisis, coding, tugas, atau pertanyaan yang rumit.</div>
+              </div>
+            </div>
+            <button id="sendBtn" class="send-btn" type="submit" aria-label="Send message" title="Send message">
+              <span class="send-icon">↑</span>
+            </button>
+          </div>
+        </form>
       </div>
 
-      <form id="composer" class="composer">
-        <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
-        <button id="attachBtn" class="icon-btn attach-btn" type="button" aria-label="Attach image" title="Attach image">+</button>
-        <textarea id="input" rows="1" maxlength="8000" placeholder="Message ZennNyx AI..." autocomplete="off" enterkeyhint="send"></textarea>
-        <button id="sendBtn" class="send-btn" type="submit" aria-label="Send message">↑</button>
-      </form>
       <p class="disclaimer">ZennNyx AI can make mistakes. Check important information.</p>
     </div>
   </main>
