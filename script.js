@@ -7,69 +7,210 @@ let messages = [];
 let busy = false;
 
 function escapeHtml(value) {
-  return value.replace(/[&<>'"]/g, ch => ({
+  return String(value ?? '').replace(/[&<>'"]/g, ch => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
   }[ch]));
 }
 
-// Small, safe Markdown renderer for normal chat formatting.
-function renderMarkdown(source) {
-  const blocks = [];
-  let text = String(source ?? '').replace(/\r\n/g, '\n');
+function renderInline(source) {
+  let text = escapeHtml(source);
 
-  text = text.replace(/```([\w+-]*)\n?([\s\S]*?)```/g, (_, lang, code) => {
-    const index = blocks.length;
-    blocks.push(`<pre class="code-block"><code${lang ? ` data-lang="${escapeHtml(lang)}"` : ''}>${escapeHtml(code.trimEnd())}</code></pre>`);
-    return `\n@@CODE${index}@@\n`;
+  // Model-generated line breaks often arrive as literal <br>. Allow only that tag.
+  text = text.replace(/&lt;br\s*\/?&gt;/gi, '<br>');
+
+  // Images are intentionally not rendered; links are limited to safe schemes.
+  text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  text = text.replace(/(^|\s)(https?:\/\/[^\s<]+)/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
+
+  text = text.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
+  text = text.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  text = text.replace(/__([^_\n]+)__/g, '<strong>$1</strong>');
+  text = text.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
+  text = text.replace(/(?<![*\w])\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
+  text = text.replace(/(?<![_\w])_([^_\n]+)_(?!_)/g, '<em>$1</em>');
+  return text;
+}
+
+function parseTable(lines, startIndex) {
+  if (startIndex + 1 >= lines.length) return null;
+
+  const header = lines[startIndex];
+  const separator = lines[startIndex + 1];
+  if (!/^\s*\|?.+\|.+\|?\s*$/.test(header)) return null;
+  if (!/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(separator)) return null;
+
+  const splitRow = (row) => {
+    let clean = row.trim();
+    if (clean.startsWith('|')) clean = clean.slice(1);
+    if (clean.endsWith('|')) clean = clean.slice(0, -1);
+    return clean.split('|').map(cell => cell.trim());
+  };
+
+  const headers = splitRow(header);
+  const alignments = splitRow(separator).map(cell => {
+    const left = cell.startsWith(':');
+    const right = cell.endsWith(':');
+    return left && right ? 'center' : right ? 'right' : left ? 'left' : '';
   });
 
-  text = escapeHtml(text);
-  text = text.replace(/^###### (.+)$/gm, '<h6>$1</h6>')
-    .replace(/^##### (.+)$/gm, '<h5>$1</h5>')
-    .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
-    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-    .replace(/^---$/gm, '<hr>')
-    .replace(/^\* (.+)$/gm, '<li>$1</li>')
-    .replace(/^- (.+)$/gm, '<li>$1</li>')
-    .replace(/^(\d+)\. (.+)$/gm, '<li class="ordered"><span>$1.</span> $2</li>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/__(.+?)__/g, '<strong>$1</strong>')
-    .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>')
-    .replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>')
-    .replace(/\n{2,}/g, '</p><p>')
-    .replace(/\n/g, '<br>');
+  const rows = [];
+  let i = startIndex + 2;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim() || !line.includes('|')) break;
+    const cells = splitRow(line);
+    rows.push(cells);
+    i += 1;
+  }
 
-  text = text.replace(/(?:<li(?: class="ordered")?[^>]*>.*?<\/li>)(?:<br>)?(?=(?:<li|$))/g, m => m);
-  text = text.replace(/((?:<li>.*?<\/li>(?:<br>)?)+)/g, '<ul>$1</ul>');
-  text = text.replace(/((?:<li class="ordered">.*?<\/li>(?:<br>)?)+)/g, '<ol>$1</ol>');
-  text = text.replace(/@@CODE(\d+)@@/g, (_, i) => blocks[Number(i)]);
+  const ths = headers.map((cell, idx) => {
+    const align = alignments[idx] ? ` style="text-align:${alignments[idx]}"` : '';
+    return `<th${align}>${renderInline(cell)}</th>`;
+  }).join('');
 
-  return `<div class="markdown"><p>${text}</p></div>`
-    .replace(/<p><\/p>/g, '')
-    .replace(/<p>(\s*<h[1-6]>)/g, '$1')
-    .replace(/(<\/h[1-6]>)<\/p>/g, '$1')
-    .replace(/<p>(\s*<hr>)<\/p>/g, '$1')
-    .replace(/<p>(\s*<ul>)/g, '$1')
-    .replace(/(<\/ul>)<\/p>/g, '$1')
-    .replace(/<p>(\s*<ol>)/g, '$1')
-    .replace(/(<\/ol>)<\/p>/g, '$1');
+  const body = rows.map(row => {
+    const cells = headers.map((_, idx) => {
+      const align = alignments[idx] ? ` style="text-align:${alignments[idx]}"` : '';
+      return `<td${align}>${renderInline(row[idx] ?? '')}</td>`;
+    }).join('');
+    return `<tr>${cells}</tr>`;
+  }).join('');
+
+  return {
+    html: `<div class="table-wrap"><table><thead><tr>${ths}</tr></thead><tbody>${body}</tbody></table></div>`,
+    nextIndex: i
+  };
+}
+
+function renderMarkdown(source) {
+  const normalized = String(source ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = normalized.split('\n');
+  const out = [];
+  let paragraph = [];
+  let listType = null;
+  let listItems = [];
+  let blockquote = [];
+
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    const body = paragraph.join('\n');
+    out.push(`<p>${renderInline(body).replace(/\n/g, '<br>')}</p>`);
+    paragraph = [];
+  };
+
+  const flushList = () => {
+    if (!listItems.length) return;
+    const tag = listType === 'ol' ? 'ol' : 'ul';
+    out.push(`<${tag}>${listItems.map(item => `<li>${renderInline(item)}</li>`).join('')}</${tag}>`);
+    listItems = [];
+    listType = null;
+  };
+
+  const flushQuote = () => {
+    if (!blockquote.length) return;
+    out.push(`<blockquote>${blockquote.map(line => renderInline(line)).join('<br>')}</blockquote>`);
+    blockquote = [];
+  };
+
+  for (let i = 0; i < lines.length; ) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Fenced code block.
+    const fence = trimmed.match(/^```([\w.+#-]*)\s*$/);
+    if (fence) {
+      flushParagraph(); flushList(); flushQuote();
+      const lang = fence[1];
+      const code = [];
+      i += 1;
+      while (i < lines.length && !/^```\s*$/.test(lines[i].trim())) {
+        code.push(lines[i]);
+        i += 1;
+      }
+      if (i < lines.length) i += 1;
+      const langAttr = lang ? ` data-lang="${escapeHtml(lang)}"` : '';
+      out.push(`<pre class="code-block"${langAttr}><code>${escapeHtml(code.join('\n'))}</code></pre>`);
+      continue;
+    }
+
+    // Markdown table.
+    const table = parseTable(lines, i);
+    if (table) {
+      flushParagraph(); flushList(); flushQuote();
+      out.push(table.html);
+      i = table.nextIndex;
+      continue;
+    }
+
+    if (/^\s*[-*_]{3,}\s*$/.test(line)) {
+      flushParagraph(); flushList(); flushQuote();
+      out.push('<hr>');
+      i += 1;
+      continue;
+    }
+
+    const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      flushParagraph(); flushList(); flushQuote();
+      const level = heading[1].length;
+      out.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
+      i += 1;
+      continue;
+    }
+
+    const quote = line.match(/^\s*>\s?(.*)$/);
+    if (quote) {
+      flushParagraph(); flushList();
+      blockquote.push(quote[1]);
+      i += 1;
+      continue;
+    }
+
+    const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+    const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
+    if (ordered || unordered) {
+      flushParagraph(); flushQuote();
+      const nextType = ordered ? 'ol' : 'ul';
+      if (listType && listType !== nextType) flushList();
+      listType = nextType;
+      listItems.push((ordered || unordered)[1]);
+      i += 1;
+      continue;
+    }
+
+    if (!trimmed) {
+      flushParagraph(); flushList(); flushQuote();
+      i += 1;
+      continue;
+    }
+
+    flushList();
+    flushQuote();
+    paragraph.push(line);
+    i += 1;
+  }
+
+  flushParagraph();
+  flushList();
+  flushQuote();
+
+  return `<div class="markdown">${out.join('')}</div>`;
 }
 
 function addMessage(role, content, isError = false) {
   const row = document.createElement('div');
   row.className = `message ${role}${isError ? ' error' : ''}`;
-  const bubble = document.createElement('div');
-  bubble.className = 'bubble';
+
+  const contentEl = document.createElement('div');
+  contentEl.className = role === 'assistant' ? 'answer' : 'bubble';
 
   if (role === 'assistant' && !isError) {
-    bubble.innerHTML = renderMarkdown(content);
+    contentEl.innerHTML = renderMarkdown(content);
   } else {
-    bubble.textContent = content;
+    contentEl.textContent = content;
   }
 
-  row.appendChild(bubble);
+  row.appendChild(contentEl);
   chat.appendChild(row);
   return row;
 }
@@ -78,7 +219,7 @@ function addTyping() {
   const row = document.createElement('div');
   row.className = 'message assistant';
   row.id = 'typing';
-  row.innerHTML = '<div class="bubble typing"><i></i><i></i><i></i></div>';
+  row.innerHTML = '<div class="answer typing"><i></i><i></i><i></i></div>';
   chat.appendChild(row);
 }
 
@@ -95,8 +236,8 @@ function showWelcome() {
   chat.innerHTML = `
     <div id="welcome" class="welcome">
       <div class="welcome-mark">Z</div>
-      <h2>How can I help?</h2>
-      <p>A simple AI assistant powered by Groq.</p>
+      <h1>How can I help?</h1>
+      <p>Ask anything, write something, or build an idea.</p>
       <div class="suggestions">
         <button type="button" data-prompt="Explain something interesting to me.">Explain something</button>
         <button type="button" data-prompt="Help me write a short paragraph.">Help me write</button>
@@ -118,10 +259,11 @@ async function sendMessage() {
   messages.push({ role: 'user', content: text });
   input.value = '';
   resizeInput();
-
-  // Close the mobile keyboard immediately after sending. Do not focus the textarea again
-  // when the response arrives; otherwise Android will reopen the keyboard.
   input.blur();
+
+  // On mobile this explicitly drops the active element so Android doesn't reopen the keyboard.
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+
   addTyping();
 
   try {
@@ -139,7 +281,6 @@ async function sendMessage() {
     const reply = data.reply || 'No response received.';
     addMessage('assistant', reply);
     messages.push({ role: 'assistant', content: reply });
-    // Deliberately do not scroll. The reader keeps their current position.
   } catch (error) {
     removeTyping();
     addMessage('assistant', `Error: ${error.message}`, true);
@@ -147,20 +288,18 @@ async function sendMessage() {
   } finally {
     busy = false;
     sendBtn.disabled = false;
-    // Intentionally do not call input.focus() here.
-    // Keeping focus would make the Android keyboard pop back up after every response.
   }
 }
 
-composer.addEventListener('submit', e => {
-  e.preventDefault();
+composer.addEventListener('submit', event => {
+  event.preventDefault();
   sendMessage();
 });
 
 input.addEventListener('input', resizeInput);
-input.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
+input.addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
     sendMessage();
   }
 });
