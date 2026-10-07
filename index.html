@@ -11,8 +11,15 @@
 <body>
   <main class="app">
     <header class="topbar" aria-label="ZennNyx AI header">
-      <div class="topbar-title">ZennNyx 1.0 Flash</div>
-      <div class="topbar-meta"><span class="status-dot"></span><span>AI assistant</span><span>·</span><span>Groq</span></div>
+      <div class="topbar-title-row">
+        <div class="topbar-title">ZennNyx 1.0 Flash</div>
+      </div>
+      <div class="topbar-meta">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span>AI assistant</span>
+        <span class="meta-sep">·</span>
+        <span>Groq</span>
+      </div>
     </header>
 
     <section id="chat" class="chat" aria-live="polite">
@@ -29,6 +36,14 @@
     </section>
 
     <div class="composer-wrap">
+      <div class="mode-row">
+        <button id="thinkBtn" class="think-toggle" type="button" aria-pressed="false">
+          <span class="think-icon" aria-hidden="true">✦</span>
+          <span>Think Harder</span>
+        </button>
+        <span id="modeHint" class="mode-hint">Short, direct answers</span>
+      </div>
+
       <form id="composer" class="composer">
         <textarea id="input" rows="1" maxlength="8000" placeholder="Message ZennNyx AI..." autocomplete="off" enterkeyhint="send"></textarea>
         <button id="sendBtn" class="send-btn" type="submit" aria-label="Send message">↑</button>

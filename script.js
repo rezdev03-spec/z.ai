@@ -2,9 +2,12 @@ const chat = document.getElementById('chat');
 const composer = document.getElementById('composer');
 const input = document.getElementById('input');
 const sendBtn = document.getElementById('sendBtn');
+const thinkBtn = document.getElementById('thinkBtn');
+const modeHint = document.getElementById('modeHint');
 
 let messages = [];
 let busy = false;
+let thinkHarder = false;
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, ch => ({
@@ -14,14 +17,9 @@ function escapeHtml(value) {
 
 function renderInline(source) {
   let text = escapeHtml(source);
-
-  // Model-generated line breaks often arrive as literal <br>. Allow only that tag.
   text = text.replace(/&lt;br\s*\/?&gt;/gi, '<br>');
-
-  // Images are intentionally not rendered; links are limited to safe schemes.
   text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
   text = text.replace(/(^|\s)(https?:\/\/[^\s<]+)/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
-
   text = text.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
   text = text.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
   text = text.replace(/__([^_\n]+)__/g, '<strong>$1</strong>');
@@ -33,13 +31,12 @@ function renderInline(source) {
 
 function parseTable(lines, startIndex) {
   if (startIndex + 1 >= lines.length) return null;
-
   const header = lines[startIndex];
   const separator = lines[startIndex + 1];
   if (!/^\s*\|?.+\|.+\|?\s*$/.test(header)) return null;
   if (!/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(separator)) return null;
 
-  const splitRow = (row) => {
+  const splitRow = row => {
     let clean = row.trim();
     if (clean.startsWith('|')) clean = clean.slice(1);
     if (clean.endsWith('|')) clean = clean.slice(0, -1);
@@ -58,8 +55,7 @@ function parseTable(lines, startIndex) {
   while (i < lines.length) {
     const line = lines[i];
     if (!line.trim() || !line.includes('|')) break;
-    const cells = splitRow(line);
-    rows.push(cells);
+    rows.push(splitRow(line));
     i += 1;
   }
 
@@ -116,7 +112,6 @@ function renderMarkdown(source) {
     const line = lines[i];
     const trimmed = line.trim();
 
-    // Fenced code block.
     const fence = trimmed.match(/^```([\w.+#-]*)\s*$/);
     if (fence) {
       flushParagraph(); flushList(); flushQuote();
@@ -129,11 +124,11 @@ function renderMarkdown(source) {
       }
       if (i < lines.length) i += 1;
       const langAttr = lang ? ` data-lang="${escapeHtml(lang)}"` : '';
-      out.push(`<pre class="code-block"${langAttr}><code>${escapeHtml(code.join('\n'))}</code></pre>`);
+      out.push(`<pre class="code-block"${langAttr}><code>${escapeHtml(code.join('\n'))}</code><button class="code-copy" type="button" data-copy-code="">Copy</button></pre>`);
+      out[out.length - 1] = out[out.length - 1].replace('data-copy-code=""', `data-copy-code="${encodeURIComponent(code.join('\n'))}"`);
       continue;
     }
 
-    // Markdown table.
     const table = parseTable(lines, i);
     if (table) {
       flushParagraph(); flushList(); flushQuote();
@@ -193,11 +188,99 @@ function renderMarkdown(source) {
   flushParagraph();
   flushList();
   flushQuote();
-
   return `<div class="markdown">${out.join('')}</div>`;
 }
 
-function addMessage(role, content, isError = false) {
+function extractSources(text) {
+  const urls = String(text ?? '').match(/https?:\/\/[^\s)<>\]]+/g) || [];
+  return [...new Set(urls.map(url => url.replace(/[.,;]+$/, '')))];
+}
+
+function formatDuration(ms) {
+  return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
+}
+
+async function copyText(text, button) {
+  try {
+    await navigator.clipboard.writeText(text);
+    const old = button.textContent;
+    button.textContent = 'Copied';
+    setTimeout(() => { button.textContent = old; }, 1100);
+  } catch {
+    button.textContent = 'Copy failed';
+    setTimeout(() => { button.textContent = 'Copy'; }, 1100);
+  }
+}
+
+function createIconButton(label, icon) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'action-btn';
+  button.setAttribute('aria-label', label);
+  button.title = label;
+  button.innerHTML = `<span class="action-icon" aria-hidden="true">${icon}</span><span class="action-label">${label}</span>`;
+  return button;
+}
+
+function addAssistantActions(row, content, elapsedMs) {
+  const wrap = document.createElement('div');
+  wrap.className = 'assistant-actions';
+
+  const copy = createIconButton('Copy', '⧉');
+  copy.addEventListener('click', () => copyText(content, copy));
+
+  const like = createIconButton('Like', '♡');
+  like.addEventListener('click', () => {
+    const active = like.classList.toggle('selected');
+    like.querySelector('.action-icon').textContent = active ? '♥' : '♡';
+    dislike.classList.remove('selected');
+    dislike.querySelector('.action-icon').textContent = '♧';
+  });
+
+  const dislike = createIconButton('Dislike', '♧');
+  dislike.addEventListener('click', () => {
+    const active = dislike.classList.toggle('selected');
+    dislike.querySelector('.action-icon').textContent = active ? '♣' : '♧';
+    like.classList.remove('selected');
+    like.querySelector('.action-icon').textContent = '♡';
+  });
+
+  const share = createIconButton('Share', '↗');
+  share.addEventListener('click', async () => {
+    const shareData = { title: 'ZennNyx AI', text: content };
+    if (navigator.share) {
+      try { await navigator.share(shareData); } catch { /* cancelled */ }
+    } else {
+      await copyText(content, share);
+    }
+  });
+
+  const sources = createIconButton('Sources', '↗');
+  const urls = extractSources(content);
+  if (!urls.length) sources.classList.add('disabled');
+  sources.addEventListener('click', () => {
+    document.querySelectorAll('.sources-popover').forEach(el => el.remove());
+    const pop = document.createElement('div');
+    pop.className = 'sources-popover';
+    if (!urls.length) {
+      pop.innerHTML = '<div class="sources-empty">No source links were included in this answer.</div>';
+    } else {
+      pop.innerHTML = `<div class="sources-title">Sources</div>${urls.map(url => `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`).join('')}`;
+    }
+    row.appendChild(pop);
+    requestAnimationFrame(() => pop.classList.add('open'));
+  });
+
+  wrap.append(copy, like, dislike, share, sources);
+  row.appendChild(wrap);
+
+  const meta = document.createElement('div');
+  meta.className = 'answer-meta';
+  meta.textContent = `${thinkHarder ? 'Worked for' : 'Generated in'} ${formatDuration(elapsedMs)}${thinkHarder ? ' · Think Harder' : ''}`;
+  row.appendChild(meta);
+}
+
+function addMessage(role, content, isError = false, elapsedMs = 0) {
   const row = document.createElement('div');
   row.className = `message ${role}${isError ? ' error' : ''}`;
 
@@ -212,6 +295,17 @@ function addMessage(role, content, isError = false) {
 
   row.appendChild(contentEl);
   chat.appendChild(row);
+
+  if (role === 'assistant' && !isError) {
+    addAssistantActions(row, content, elapsedMs);
+    row.querySelectorAll('.code-copy').forEach(button => {
+      button.addEventListener('click', () => {
+        const code = decodeURIComponent(button.dataset.copyCode || '');
+        copyText(code, button);
+      });
+    });
+  }
+
   return row;
 }
 
@@ -223,9 +317,7 @@ function addTyping() {
   chat.appendChild(row);
 }
 
-function removeTyping() {
-  document.getElementById('typing')?.remove();
-}
+function removeTyping() { document.getElementById('typing')?.remove(); }
 
 function resizeInput() {
   input.style.height = 'auto';
@@ -247,12 +339,19 @@ function showWelcome() {
   bindSuggestions();
 }
 
+function updateThinkMode() {
+  thinkBtn.setAttribute('aria-pressed', String(thinkHarder));
+  thinkBtn.classList.toggle('active', thinkHarder);
+  modeHint.textContent = thinkHarder ? 'Structured, deeper answers' : 'Short, direct answers';
+}
+
 async function sendMessage() {
   const text = input.value.trim();
   if (!text || busy) return;
 
   busy = true;
   sendBtn.disabled = true;
+  thinkBtn.disabled = true;
   document.getElementById('welcome')?.remove();
 
   addMessage('user', text);
@@ -260,26 +359,25 @@ async function sendMessage() {
   input.value = '';
   resizeInput();
   input.blur();
-
-  // On mobile this explicitly drops the active element so Android doesn't reopen the keyboard.
   if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
 
   addTyping();
+  const startedAt = performance.now();
 
   try {
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages })
+      body: JSON.stringify({ messages, thinkHarder })
     });
 
     const data = await response.json().catch(() => ({}));
     removeTyping();
-
     if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
 
     const reply = data.reply || 'No response received.';
-    addMessage('assistant', reply);
+    const elapsed = performance.now() - startedAt;
+    addMessage('assistant', reply, false, elapsed);
     messages.push({ role: 'assistant', content: reply });
   } catch (error) {
     removeTyping();
@@ -288,6 +386,7 @@ async function sendMessage() {
   } finally {
     busy = false;
     sendBtn.disabled = false;
+    thinkBtn.disabled = false;
   }
 }
 
@@ -296,11 +395,23 @@ composer.addEventListener('submit', event => {
   sendMessage();
 });
 
+thinkBtn.addEventListener('click', () => {
+  if (busy) return;
+  thinkHarder = !thinkHarder;
+  updateThinkMode();
+});
+
 input.addEventListener('input', resizeInput);
 input.addEventListener('keydown', event => {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     sendMessage();
+  }
+});
+
+document.addEventListener('click', event => {
+  if (!event.target.closest('.sources-popover') && !event.target.closest('[aria-label="Sources"]')) {
+    document.querySelectorAll('.sources-popover').forEach(el => el.remove());
   }
 });
 
@@ -315,4 +426,5 @@ function bindSuggestions() {
 }
 
 bindSuggestions();
+updateThinkMode();
 resizeInput();
