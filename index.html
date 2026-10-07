@@ -10,22 +10,15 @@
 </head>
 <body>
   <main class="app">
-    <header class="topbar">
-      <div class="brand">
-        <div class="logo" aria-hidden="true">Z</div>
-        <div>
-          <h1>ZennNyx AI</h1>
-          <p>AI assistant · Groq</p>
-        </div>
-      </div>
-      <button id="clearBtn" class="icon-btn" type="button" aria-label="Clear chat" title="Clear chat">⌫</button>
+    <header class="topbar" aria-label="ZennNyx AI header">
+      <div class="topbar-title">ZennNyx 1.0 Flash</div>
     </header>
 
     <section id="chat" class="chat" aria-live="polite">
       <div id="welcome" class="welcome">
         <div class="welcome-mark">Z</div>
-        <h2>How can I help?</h2>
-        <p>A simple AI assistant powered by Groq.</p>
+        <h1>How can I help?</h1>
+        <p>Ask anything, write something, or build an idea.</p>
         <div class="suggestions">
           <button type="button" data-prompt="Explain something interesting to me.">Explain something</button>
           <button type="button" data-prompt="Help me write a short paragraph.">Help me write</button>
@@ -36,7 +29,7 @@
 
     <div class="composer-wrap">
       <form id="composer" class="composer">
-        <textarea id="input" rows="1" maxlength="8000" placeholder="Message ZennNyx AI..." autocomplete="off"></textarea>
+        <textarea id="input" rows="1" maxlength="8000" placeholder="Message ZennNyx AI..." autocomplete="off" enterkeyhint="send"></textarea>
         <button id="sendBtn" class="send-btn" type="submit" aria-label="Send message">↑</button>
       </form>
       <p class="disclaimer">ZennNyx AI can make mistakes. Check important information.</p>

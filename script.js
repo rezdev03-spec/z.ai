@@ -2,7 +2,6 @@ const chat = document.getElementById('chat');
 const composer = document.getElementById('composer');
 const input = document.getElementById('input');
 const sendBtn = document.getElementById('sendBtn');
-const clearBtn = document.getElementById('clearBtn');
 
 let messages = [];
 let busy = false;
@@ -119,6 +118,10 @@ async function sendMessage() {
   messages.push({ role: 'user', content: text });
   input.value = '';
   resizeInput();
+
+  // Close the mobile keyboard immediately after sending. Do not focus the textarea again
+  // when the response arrives; otherwise Android will reopen the keyboard.
+  input.blur();
   addTyping();
 
   try {
@@ -144,7 +147,8 @@ async function sendMessage() {
   } finally {
     busy = false;
     sendBtn.disabled = false;
-    input.focus();
+    // Intentionally do not call input.focus() here.
+    // Keeping focus would make the Android keyboard pop back up after every response.
   }
 }
 
@@ -159,12 +163,6 @@ input.addEventListener('keydown', e => {
     e.preventDefault();
     sendMessage();
   }
-});
-
-clearBtn.addEventListener('click', () => {
-  if (busy) return;
-  messages = [];
-  showWelcome();
 });
 
 function bindSuggestions() {
