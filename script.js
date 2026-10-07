@@ -276,13 +276,15 @@ function addAssistantActions(row, content, elapsedMs) {
 
   const meta = document.createElement('div');
   meta.className = 'answer-meta';
-  meta.textContent = `${thinkHarder ? 'Worked for' : 'Generated in'} ${formatDuration(elapsedMs)}${thinkHarder ? ' · Think Harder' : ''}`;
-  row.appendChild(meta);
+  meta.textContent = `Generated for ${formatDuration(elapsedMs)}${thinkHarder ? ' · Think Harder' : ''}`;
+  row.insertBefore(meta, row.firstChild);
 }
 
 function addMessage(role, content, isError = false, elapsedMs = 0) {
   const row = document.createElement('div');
   row.className = `message ${role}${isError ? ' error' : ''}`;
+  if (role === 'user') row.classList.add('message-enter');
+  if (role === 'assistant' && !isError) row.classList.add('assistant-enter');
 
   const contentEl = document.createElement('div');
   contentEl.className = role === 'assistant' ? 'answer' : 'bubble';
@@ -311,7 +313,7 @@ function addMessage(role, content, isError = false, elapsedMs = 0) {
 
 function addTyping() {
   const row = document.createElement('div');
-  row.className = 'message assistant';
+  row.className = 'message assistant responding';
   row.id = 'typing';
   row.innerHTML = '<div class="answer typing"><i></i><i></i><i></i></div>';
   chat.appendChild(row);
@@ -342,6 +344,9 @@ function showWelcome() {
 function updateThinkMode() {
   thinkBtn.setAttribute('aria-pressed', String(thinkHarder));
   thinkBtn.classList.toggle('active', thinkHarder);
+  thinkBtn.classList.remove('toggle-pulse');
+  void thinkBtn.offsetWidth;
+  thinkBtn.classList.add('toggle-pulse');
   modeHint.textContent = thinkHarder ? 'Structured, deeper answers' : 'Short, direct answers';
 }
 
