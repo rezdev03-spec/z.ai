@@ -12,9 +12,24 @@
   <main class="app">
     <header class="topbar" aria-label="ZennNyx AI header">
       <div class="header-fade" aria-hidden="true"></div>
+      <div class="topbar-controls topbar-left">
+        <button id="menuBtn" class="topbar-btn" type="button" aria-label="About ZennNyx AI" title="About ZennNyx AI">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+        <button id="newChatBtn" class="topbar-btn" type="button" aria-label="New chat" title="New chat">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19h4L19.4 8.6a2 2 0 0 0-2.8-2.8L6.2 16.2 5 19Z"/><path d="m14.9 7.1 2 2"/></svg>
+        </button>
+      </div>
       <div class="brand-title">ZennNyx 1.0 Flash</div>
       <div class="brand-meta"><span class="status-dot"></span><span>AI ASSISTANT</span></div>
     </header>
+
+    <div id="aboutPopover" class="about-popover" hidden role="dialog" aria-label="About ZennNyx AI">
+      <div class="about-mark">Z</div>
+      <div class="about-title">ZennNyx AI</div>
+      <div class="about-text">AI assistant untuk ngobrol, belajar, menganalisis gambar, dan membantu berbagai ide sehari-hari.</div>
+      <div class="about-dev">Dev <strong>@zennlonevyn</strong></div>
+    </div>
 
     <section id="chat" class="chat" aria-live="polite">
       <div id="welcome" class="welcome">

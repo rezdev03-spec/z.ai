@@ -8,6 +8,9 @@ const imagePreview = document.getElementById('imagePreview');
 const thinkBtn = document.getElementById('thinkBtn');
 const thinkPopover = document.getElementById('thinkPopover');
 const thinkSwitch = document.getElementById('thinkSwitch');
+const menuBtn = document.getElementById('menuBtn');
+const newChatBtn = document.getElementById('newChatBtn');
+const aboutPopover = document.getElementById('aboutPopover');
 
 let messages = [];
 let pendingImage = null;
@@ -175,6 +178,37 @@ imageInput.addEventListener('change',()=>prepareImage(imageInput.files?.[0]));
 input.addEventListener('input',()=>{resizeInput();updateSendState();});
 input.addEventListener('keydown',e=>{if(e.key==='Enter'){/* Enter always inserts a newline; sending is button-only. */if(e.isComposing)return;requestAnimationFrame(resizeInput);}});
 input.addEventListener('paste',e=>{const item=[...(e.clipboardData?.items||[])].find(x=>x.type.startsWith('image/'));if(item&&!busy){const file=item.getAsFile();if(file){e.preventDefault();prepareImage(file);}}});
-document.addEventListener('click',e=>{if(!e.target.closest('.think-area'))toggleThinkPopover(false);if(!e.target.closest('.sources-popover')&&!e.target.closest('[aria-label="Sources"]'))document.querySelectorAll('.sources-popover').forEach(el=>el.remove());});
+document.addEventListener('click',e=>{if(!e.target.closest('.think-area'))toggleThinkPopover(false);if(!e.target.closest('.about-popover')&&!e.target.closest('#menuBtn'))toggleAbout(false);if(!e.target.closest('.sources-popover')&&!e.target.closest('[aria-label="Sources"]'))document.querySelectorAll('.sources-popover').forEach(el=>el.remove());});
+function toggleAbout(open){
+  if(open){
+    aboutPopover.hidden=false;
+    requestAnimationFrame(()=>aboutPopover.classList.add('open'));
+  }else{
+    aboutPopover.classList.remove('open');
+    setTimeout(()=>{if(!aboutPopover.classList.contains('open'))aboutPopover.hidden=true},420);
+  }
+}
+function resetToNewChat(){
+  if(busy){showToast('Tunggu sampai ZennNyx selesai merespons.');return;}
+  messages=[];
+  clearImage();
+  input.value='';
+  resizeInput();
+  thinkHarder=false;
+  updateThinkMode(false);
+  toggleThinkPopover(false);
+  toggleAbout(false);
+  document.getElementById('typing')?.remove();
+  chat.innerHTML='';
+  const welcome=document.createElement('div');
+  welcome.id='welcome';
+  welcome.className='welcome';
+  welcome.innerHTML=`<div class="welcome-mark">Z</div><h1>How can I help?</h1><p>Ask anything, write something, or build an idea.</p><div class="suggestions"><button type="button" data-prompt="Explain something interesting to me.">Explain something</button><button type="button" data-prompt="Help me write a short paragraph.">Help me write</button><button type="button" data-prompt="Give me a creative idea for a website.">Give me an idea</button></div>`;
+  chat.appendChild(welcome);
+  bindSuggestions();
+  updateSendState();
+}
 function bindSuggestions(){document.querySelectorAll('[data-prompt]').forEach(btn=>btn.addEventListener('click',()=>{input.value=btn.dataset.prompt;resizeInput();updateSendState();input.focus();}));}
+menuBtn.addEventListener('click',e=>{e.stopPropagation();toggleThinkPopover(false);toggleAbout(aboutPopover.hidden);});
+newChatBtn.addEventListener('click',e=>{e.stopPropagation();resetToNewChat();});
 bindSuggestions();updateThinkMode(false);resizeInput();updateSendState();
