@@ -11,15 +11,8 @@
 <body>
   <main class="app">
     <header class="topbar" aria-label="ZennNyx AI header">
-      <div class="topbar-title-row">
-        <div class="topbar-title">ZennNyx 1.0 Flash</div>
-      </div>
-      <div class="topbar-meta">
-        <span class="status-dot" aria-hidden="true"></span>
-        <span>AI assistant</span>
-        <span class="meta-sep">·</span>
-        <span>Groq</span>
-      </div>
+      <div class="brand-title">ZennNyx 1.0 Flash</div>
+      <div class="brand-meta"><span class="status-dot"></span><span>AI ASSISTANT</span><span>·</span><span>GROQ</span></div>
     </header>
 
     <section id="chat" class="chat" aria-live="polite">
@@ -36,15 +29,17 @@
     </section>
 
     <div class="composer-wrap">
+      <div id="imagePreview" class="image-preview" hidden></div>
       <div class="mode-row">
         <button id="thinkBtn" class="think-toggle" type="button" aria-pressed="false">
-          <span class="think-icon" aria-hidden="true">✦</span>
-          <span>Think Harder</span>
+          <span class="think-icon">✦</span><span>Think Harder</span>
         </button>
         <span id="modeHint" class="mode-hint">Short, direct answers</span>
       </div>
 
       <form id="composer" class="composer">
+        <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
+        <button id="attachBtn" class="icon-btn attach-btn" type="button" aria-label="Attach image" title="Attach image">+</button>
         <textarea id="input" rows="1" maxlength="8000" placeholder="Message ZennNyx AI..." autocomplete="off" enterkeyhint="send"></textarea>
         <button id="sendBtn" class="send-btn" type="submit" aria-label="Send message">↑</button>
       </form>
