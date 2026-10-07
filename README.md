@@ -1,18 +1,18 @@
 # ZennNyx AI
 
-Minimal black/white AI chat for Vercel + Groq.
+Minimal black/white AI chat UI for Vercel + Groq.
 
-## Environment variables
+## Environment variable
 
-Set these in Vercel:
+Set this in Vercel:
 
-- `GROQ_API_KEY` = your Groq API key
-- `GROQ_MODEL` = `openai/gpt-oss-20b` (optional; this is already the default)
+`GROQ_API_KEY=your_groq_api_key`
 
-No Gemini key, DeepSeek key, OpenRouter key, or client-side API key is used.
+The frontend never receives the key.
 
-## Deploy
+## Notes
 
-Import this folder into Vercel. Add the environment variable, redeploy, then open the deployment.
-
-The frontend automatically follows the device/browser system theme via `prefers-color-scheme`.
+- Theme follows the device/browser system light/dark preference.
+- Chat responses render common Markdown formatting.
+- The page does not force-scroll when an AI response arrives.
+- The disclaimer lives inside the composer area so it does not overlap the chat UI.

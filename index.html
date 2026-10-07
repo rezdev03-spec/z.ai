@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" content="#ffffff" />
   <title>ZennNyx AI</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
@@ -11,10 +12,10 @@
   <main class="app">
     <header class="topbar">
       <div class="brand">
-        <div class="logo">Z</div>
+        <div class="logo" aria-hidden="true">Z</div>
         <div>
           <h1>ZennNyx AI</h1>
-          <p>Simple. Fast. Yours.</p>
+          <p>AI assistant · Groq</p>
         </div>
       </div>
       <button id="clearBtn" class="icon-btn" type="button" aria-label="Clear chat" title="Clear chat">⌫</button>
@@ -23,8 +24,8 @@
     <section id="chat" class="chat" aria-live="polite">
       <div id="welcome" class="welcome">
         <div class="welcome-mark">Z</div>
-        <h2>What can I help with?</h2>
-        <p>Ask anything. ZennNyx AI will answer directly.</p>
+        <h2>How can I help?</h2>
+        <p>A simple AI assistant powered by Groq.</p>
         <div class="suggestions">
           <button type="button" data-prompt="Explain something interesting to me.">Explain something</button>
           <button type="button" data-prompt="Help me write a short paragraph.">Help me write</button>
@@ -33,11 +34,13 @@
       </div>
     </section>
 
-    <form id="composer" class="composer">
-      <textarea id="input" rows="1" maxlength="8000" placeholder="Message ZennNyx AI..." autocomplete="off"></textarea>
-      <button id="sendBtn" class="send-btn" type="submit" aria-label="Send message">↑</button>
-    </form>
-    <p class="disclaimer">ZennNyx AI can make mistakes. Check important information.</p>
+    <div class="composer-wrap">
+      <form id="composer" class="composer">
+        <textarea id="input" rows="1" maxlength="8000" placeholder="Message ZennNyx AI..." autocomplete="off"></textarea>
+        <button id="sendBtn" class="send-btn" type="submit" aria-label="Send message">↑</button>
+      </form>
+      <p class="disclaimer">ZennNyx AI can make mistakes. Check important information.</p>
+    </div>
   </main>
   <script src="/script.js"></script>
 </body>
