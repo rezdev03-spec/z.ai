@@ -76,17 +76,29 @@ function takeRateLimit(req,res){
 
 
 function extractUserText(messages){
-  const parts=[];
-  for(let i=messages.length-1;i>=0&&parts.length<4;i--){
+  // Search only the current user turn.
+  // The old implementation joined the previous four user messages, which caused
+  // unrelated sources from earlier questions to leak into the current Sources panel.
+  for(let i=messages.length-1;i>=0;i--){
     const m=messages[i];
     if(m?.role!=='user')continue;
-    if(typeof m.content==='string')parts.unshift(m.content);
-    else if(Array.isArray(m.content)){
-      const text=m.content.find(p=>p?.type==='text'&&typeof p.text==='string')?.text;
-      if(text)parts.unshift(text);
+
+    if(typeof m.content==='string')
+      return m.content.replace(/\s+/g,' ').trim().slice(0,1800);
+
+    if(Array.isArray(m.content)){
+      const text=m.content.find(
+        p=>p?.type==='text'&&typeof p.text==='string'
+      )?.text;
+
+      if(text)
+        return text.replace(/\s+/g,' ').trim().slice(0,1800);
     }
+
+    break;
   }
-  return parts.join(' ').replace(/\s+/g,' ').trim().slice(-1800);
+
+  return '';
 }
 
 function shouldSearchWeb(query){
@@ -231,11 +243,11 @@ export default async function handler(req, res) {
   const currentDate=new Date().toISOString().slice(0,10);
 
   const webInstruction=webResult.used
-    ? `\n\nLIVE WEB RESEARCH IS AVAILABLE FOR THIS REQUEST. Use the sources below as the primary evidence for current/factual claims. Do not invent details that are not supported by the sources. When a claim is based on a source, append a simple citation marker like [1], [2], etc. Only use citation numbers that exist below. If sources disagree, say so briefly.\n\n${webContext}`
+    ? `\n\nLIVE WEB RESEARCH IS AVAILABLE FOR THIS REQUEST. Use the sources below as the primary evidence for current/factual claims. These sources belong to THIS user turn only. Do not reuse source lists from earlier turns. Do not invent details that are not supported by the sources. When a claim is based on a source, append a simple citation marker like [1], [2], etc. Only use citation numbers that exist below. If sources disagree, say so briefly.\n\n${webContext}`
     : (wantsWeb?`\n\nThe user asked for information that may require current web data, but live web search was unavailable. Be explicit about uncertainty and do not pretend that you searched the web.`:'');
 
-  const normalPrompt = `You are ZennNyx AI, a helpful, friendly AI assistant. Today's date is ${currentDate}. Match the user's language and tone. Keep answers concise, direct, natural, and useful by default. Use Markdown when it improves readability. Maintain continuity with earlier messages. If an image is present anywhere in the conversation, use it as visual context when relevant to a follow-up question. Describe only what is actually supported by the image. Do not identify a real person in an image or guess their identity. Never reveal private chain-of-thought; give the answer and concise rationale instead. Do not claim to have browsed the web unless live web research is actually supplied below.${webInstruction}`;
-  const thinkPrompt = `You are ZennNyx AI in Think Harder mode. Today's date is ${currentDate}. Match the user's language and tone. Think carefully before answering, then provide a structured, professional, well-organized response. Use headings, steps, bullets, examples, comparisons, and concise conclusions when useful. Maintain continuity with earlier messages. If an image is present anywhere in the conversation, analyze it carefully when relevant. Do not identify a real person in an image or guess their identity. Be thorough without unnecessary repetition. Never reveal private chain-of-thought; provide the useful conclusion and concise rationale instead. Use Markdown naturally. Do not claim to have browsed the web unless live web research is actually supplied below.${webInstruction}`;
+  const normalPrompt = `You are ZennNyx AI, a helpful, friendly AI assistant. Today's date is ${currentDate}. Match the user's language and tone. Keep answers concise, direct, natural, and useful by default. Use Markdown when it improves readability. Maintain continuity with earlier messages. If an image is present anywhere in the conversation, use it as visual context when relevant to a follow-up question. Describe only what is actually supported by the image. Do not identify a real person in an image or guess their identity. Never reveal private chain-of-thought; give the answer and concise rationale instead. Previous assistant messages may contain a [Web sources used...] metadata block. Treat it as context from the previous turn only; do not present those old sources as sources for the current turn. Do not claim to have browsed the web unless live web research is actually supplied below.${webInstruction}`;
+  const thinkPrompt = `You are ZennNyx AI in Think Harder mode. Today's date is ${currentDate}. Match the user's language and tone. Think carefully before answering, then provide a structured, professional, well-organized response. Use headings, steps, bullets, examples, comparisons, and concise conclusions when useful. Maintain continuity with earlier messages. If an image is present anywhere in the conversation, analyze it carefully when relevant. Do not identify a real person in an image or guess their identity. Be thorough without unnecessary repetition. Never reveal private chain-of-thought; provide the useful conclusion and concise rationale instead. Use Markdown naturally. Previous assistant messages may contain a [Web sources used...] metadata block. Treat it as context from the previous turn only; do not present those old sources as sources for the current turn. Do not claim to have browsed the web unless live web research is actually supplied below.${webInstruction}`;
 
   try {
     const upstream = await fetch('https://api.groq.com/openai/v1/chat/completions', {
