@@ -34,7 +34,7 @@ function escapeHtml(value='') {
 }
 function escapeAttr(value=''){return escapeHtml(value).replace(/`/g,'&#96;');}
 function safeUrl(value='') { try { const u = new URL(value); return ['http:','https:'].includes(u.protocol) ? u.href : '#'; } catch { return '#'; } }
-function renderInline(text){let s=escapeHtml(text);s=s.replace(/`([^`]+)`/g,'<code class="inline-code">$1</code>');s=s.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');s=s.replace(/__(.+?)__/g,'<strong>$1</strong>');s=s.replace(/~~(.+?)~~/g,'<del>$1</del>');s=s.replace(/(^|[\s(])(https?:\/\/[^\s<]+)/g,(m,p,url)=>`${p}<a href="${escapeAttr(safeUrl(url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`);s=s.replace(/\*([^*\n]+)\*/g,'<em>$1</em>');s=s.replace(/_([^_\n]+)_/g,'<em>$1</em>');return s;}
+function renderInline(text){let s=escapeHtml(text);s=s.replace(/&lt;br\s*\/?&gt;/gi,'<br>');s=s.replace(/`([^`]+)`/g,'<code class="inline-code">$1</code>');s=s.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');s=s.replace(/__(.+?)__/g,'<strong>$1</strong>');s=s.replace(/~~(.+?)~~/g,'<del>$1</del>');s=s.replace(/(^|[\s(])(https?:\/\/[^\s<]+)/g,(m,p,url)=>`${p}<a href="${escapeAttr(safeUrl(url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`);s=s.replace(/\*([^*\n]+)\*/g,'<em>$1</em>');s=s.replace(/_([^_\n]+)_/g,'<em>$1</em>');return s;}
 function parseTable(lines){
   if(lines.length<2||!/^[|\s]*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[1]))return null;
   const split=line=>line.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(x=>x.trim());

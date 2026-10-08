@@ -1,22 +1,20 @@
-# ZennNyx AI v8
+# ZennNyx AI v8.8
 
-A lightweight AI assistant UI designed for comfortable daily use.
+Daily-use AI chatbot frontend + Vercel serverless backend.
 
-## Features
-- ZennNyx-branded frontend with provider details kept server-side
-- Multi-turn text and image conversations
-- Vision follow-ups without the previous multimodal-history format bug
-- Think Harder popover and animated active state
-- Enter creates a new line; Send button is the only send action
-- Markdown, code blocks, tables, copy/share/feedback/source controls
-- Mobile-friendly composer and keyboard behavior
-- Image preview, resize/compression, paste image support
-- Friendly user-facing errors; provider errors stay server-side
+## v8.8 changes
+- ChatGPT-like bottom composer with real browser voice input button.
+- Plus menu now contains Camera, Photo, and Think Harder.
+- Camera/Photo use local file selection; images are compressed in-browser before sending.
+- Think Harder is toggled from the plus menu and remains a frontend state passed to the backend.
+- Top header is simplified to centered "ZennNyx AI" with liquid-glass hamburger and New Chat buttons.
+- Header fade now includes a stronger-to-weaker blur gradient.
+- Popovers use a liquid-glass style with blur, translucent fill, thin highlight stroke, and depth shadow.
+- Send button is circular with a compact, thick arrow icon.
+- Markdown/table renderer remains optimized for readable body text, smaller table text, and horizontal table overflow without blocking vertical page scrolling.
+- No provider branding is shown in the frontend.
 
 ## Environment variables
-Set these in Vercel:
-- `GROQ_API_KEY` — required server-side key
-- `GROQ_MODEL` — optional text model override; default `openai/gpt-oss-20b`
-- `GROQ_VISION_MODEL` — optional vision model override; default `qwen/qwen3.8-27b`
-
-Do not expose the API key in frontend code.
+- `GROQ_API_KEY` (required)
+- `GROQ_MODEL` (optional)
+- `GROQ_VISION_MODEL` (optional)

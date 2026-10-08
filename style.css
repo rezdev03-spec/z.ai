@@ -61,3 +61,65 @@ textarea{flex:1;min-width:0;resize:none;border:0!important;outline:0!important;b
 @keyframes messageIn{0%{opacity:0;transform:translateY(14px) scale(.985)}55%{opacity:1;transform:translateY(1px) scale(1.002)}100%{opacity:1;transform:none}}
 @keyframes assistantIn{0%{opacity:0;transform:translateY(16px)}58%{opacity:1;transform:translateY(2px)}100%{opacity:1;transform:none}}
 @keyframes recordPulse{0%,100%{box-shadow:0 0 0 0 rgba(0,0,0,.08)}50%{box-shadow:0 0 0 8px rgba(0,0,0,.08)}}
+
+/* v8.9 fixes: real glass backdrop + safe Markdown line breaks + stable table columns */
+.glass-btn,
+.glass-popover,
+.attach-popover,
+.sources-popover,
+.toast {
+  background: linear-gradient(180deg, rgba(255,255,255,.46), rgba(255,255,255,.28));
+  border-color: rgba(255,255,255,.76);
+  -webkit-backdrop-filter: blur(30px) saturate(165%) contrast(104%);
+  backdrop-filter: blur(30px) saturate(165%) contrast(104%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.90),
+    inset 0 -1px 0 rgba(255,255,255,.28),
+    0 18px 50px rgba(0,0,0,.12);
+}
+.glass-btn::before,
+.glass-popover::before,
+.attach-popover::before,
+.sources-popover::before,
+.toast::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-radius:inherit;
+  pointer-events:none;
+  background:linear-gradient(135deg,rgba(255,255,255,.24),transparent 42%,rgba(255,255,255,.08));
+}
+.glass-popover{isolation:isolate;overflow:hidden}
+.about-popover{position:fixed;}
+.attach-popover{
+  position:absolute;
+  left:7px;
+  bottom:72px;
+  z-index:90;
+}
+.table-wrap{touch-action:pan-x pan-y;}
+.markdown th:first-child,
+.markdown td:first-child{
+  min-width:max-content;
+  max-width:none;
+  white-space:nowrap;
+  overflow-wrap:normal;
+  word-break:normal;
+}
+.markdown th:nth-child(2),
+.markdown td:nth-child(2){
+  min-width:clamp(180px,42vw,320px);
+  max-width:min(60vw,420px);
+}
+
+@media(prefers-color-scheme:dark){
+  .glass-btn,
+  .glass-popover,
+  .attach-popover,
+  .sources-popover,
+  .toast{
+    background:linear-gradient(180deg,rgba(36,36,38,.50),rgba(24,24,26,.30));
+    border-color:rgba(255,255,255,.22);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 18px 50px rgba(0,0,0,.46);
+  }
+}
