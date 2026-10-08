@@ -57,9 +57,12 @@ function parseTable(lines) {
   while (end < lines.length) {
     const raw = lines[end];
     if (!raw.trim()) break;
-    if (!raw.includes('|')) break;
+    // A table body row must actually look like a pipe-delimited row.
+    // Normal prose containing a single pipe, headings, blockquotes, etc.
+    // must terminate the table instead of being swallowed into it.
+    if (!/^\s*\|?.+\|.+\|?\s*$/.test(raw)) break;
     const row = split(raw);
-    if (row.length < 2) break;
+    if (row.length !== head.length) break;
     body.push(row);
     end++;
   }
