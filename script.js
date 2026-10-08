@@ -126,7 +126,7 @@ function renderMarkdown(md=''){
 function showToast(text){let t=document.querySelector('.toast');if(!t){t=document.createElement('div');t.className='toast';document.body.appendChild(t);}t.textContent=text;t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),1700);}
 async function copyText(text,button){try{await navigator.clipboard.writeText(text);if(button){const label=button.querySelector('.action-label');if(label){const old=label.textContent;label.textContent='Copied';button.classList.add('selected');setTimeout(()=>{label.textContent=old;button.classList.remove('selected')},1100);}}else showToast('Copied');}catch{showToast('Could not copy');}}
 function extractUrls(text){return [...new Set((String(text).match(/https?:\/\/[^\s)\]}>]+/g)||[]).map(u=>u.replace(/[.,;:]+$/,'')))].slice(0,12);}
-function addAssistantActions(row,content,elapsedMs,usedThink,sources=[]){
+function addAssistantActions(row,content,elapsedMs,usedThink,sources=[],webSearched=false){
   const wrap=document.createElement('div');wrap.className='assistant-actions';
   const copy=document.createElement('button');copy.type='button';copy.className='action-btn';copy.setAttribute('aria-label','Copy');copy.innerHTML=`<span class="action-icon">${icons.copy}</span><span class="action-label">Copy</span>`;copy.addEventListener('click',()=>copyText(content,copy));
   const like=document.createElement('button');like.type='button';like.className='action-btn';like.setAttribute('aria-label','Like');like.innerHTML=`<span class="action-icon">${icons.like}</span>`;
@@ -134,9 +134,20 @@ function addAssistantActions(row,content,elapsedMs,usedThink,sources=[]){
   like.addEventListener('click',()=>{like.classList.toggle('selected');dislike.classList.remove('selected')});dislike.addEventListener('click',()=>{dislike.classList.toggle('selected');like.classList.remove('selected')});
   const share=document.createElement('button');share.type='button';share.className='action-btn';share.setAttribute('aria-label','Share');share.innerHTML=`<span class="action-icon">${icons.share}</span>`;share.addEventListener('click',async()=>{try{if(navigator.share)await navigator.share({title:'ZennNyx AI',text:content.slice(0,1500)});else await copyText(content)}catch{}});
 
-  const liveSources=Array.isArray(sources)?sources.filter(s=>s&&typeof s.url==='string'&&safeUrl(s.url)!=='#').slice(0,8):[];
-  const fallbackUrls=extractUrls(content).map(u=>({title:u,url:u,snippet:'Link referenced in the answer.'}));
-  const sourceList=liveSources.length?liveSources:fallbackUrls;
+  const liveSources=Array.isArray(sources)
+    ? sources.filter(s=>s&&typeof s.url==='string'&&safeUrl(s.url)!=='#').slice(0,8)
+    : [];
+
+  const fallbackUrls=extractUrls(content).map(u=>({
+    title:u,
+    url:u,
+    snippet:'Link referenced in the answer.'
+  }));
+
+  // Never show old/quoted URLs as "Sources" for a live-searched answer.
+  const sourceList=liveSources.length
+    ? liveSources
+    : (webSearched ? [] : fallbackUrls);
 
   const source=document.createElement('button');source.type='button';source.className=`action-btn ${sourceList.length?'':'disabled'}`;source.setAttribute('aria-label','Sources');source.innerHTML=`<span class="action-icon">${icons.link}</span><span class="action-label">Sources</span>`;source.disabled=!sourceList.length;
   source.addEventListener('click',()=>{
@@ -152,12 +163,15 @@ function addAssistantActions(row,content,elapsedMs,usedThink,sources=[]){
     row.appendChild(pop);requestAnimationFrame(()=>pop.classList.add('open'));
   });
 
-  const meta=document.createElement('div');meta.className='answer-meta';const seconds=(elapsedMs/1000).toFixed(1);meta.textContent=`Generated for ${seconds}s${usedThink?' · Think Harder':''}${liveSources.length?' · Web searched':''}`;row.querySelector('.answer').prepend(meta);
+  const meta=document.createElement('div');
+  meta.className='answer-meta';
+  const seconds=(elapsedMs/1000).toFixed(1);
+  meta.textContent=`Generated for ${seconds}s${usedThink?' · Think Harder':''}${webSearched?' · Web searched':''}`;row.querySelector('.answer').prepend(meta);
   wrap.append(copy,like,dislike,share,source);row.appendChild(wrap);
   const disclaimer=document.createElement('div');disclaimer.className='answer-disclaimer';disclaimer.textContent='ZennNyx AI can make mistakes. Check important information.';row.appendChild(disclaimer);
   row.querySelectorAll('.code-copy').forEach(b=>b.addEventListener('click',()=>copyText(decodeURIComponent(b.dataset.copyCode||''),b)));
 }
-function addMessage(role,content,isError=false,elapsedMs=0,usedThink=false,imageData=null,sources=[]){const row=document.createElement('div');row.className=`message ${role}${isError?' error':''}`;row.classList.add(role==='assistant'?'assistant-enter':'message-enter');row.style.animation=role==='assistant'?'assistantIn .95s cubic-bezier(.16,1,.3,1) both':'messageIn .85s cubic-bezier(.16,1,.3,1) both';const contentEl=document.createElement('div');contentEl.className=role==='assistant'?'answer':'bubble';if(role==='assistant'&&!isError)contentEl.innerHTML=renderMarkdown(content);else contentEl.innerHTML=isError?`<strong>${escapeHtml(content)}</strong>`:escapeHtml(content).replace(/\n/g,'<br>');if(role==='user'&&imageData){const img=document.createElement('img');img.className='message-image';img.src=imageData;img.alt='Attached image';contentEl.prepend(img);}row.appendChild(contentEl);chat.appendChild(row);if(role==='assistant'&&!isError)addAssistantActions(row,content,elapsedMs,usedThink,sources);return row;}
+function addMessage(role,content,isError=false,elapsedMs=0,usedThink=false,imageData=null,sources=[],webSearched=false){const row=document.createElement('div');row.className=`message ${role}${isError?' error':''}`;row.classList.add(role==='assistant'?'assistant-enter':'message-enter');row.style.animation=role==='assistant'?'assistantIn .95s cubic-bezier(.16,1,.3,1) both':'messageIn .85s cubic-bezier(.16,1,.3,1) both';const contentEl=document.createElement('div');contentEl.className=role==='assistant'?'answer':'bubble';if(role==='assistant'&&!isError)contentEl.innerHTML=renderMarkdown(content);else contentEl.innerHTML=isError?`<strong>${escapeHtml(content)}</strong>`:escapeHtml(content).replace(/\n/g,'<br>');if(role==='user'&&imageData){const img=document.createElement('img');img.className='message-image';img.src=imageData;img.alt='Attached image';contentEl.prepend(img);}row.appendChild(contentEl);chat.appendChild(row);if(role==='assistant'&&!isError)addAssistantActions(row,content,elapsedMs,usedThink,sources,webSearched);return row;}
 function addTyping(){const row=document.createElement('div');row.id='typing';row.className='message assistant responding';row.innerHTML='<div class="answer typing"><span></span><span></span><span></span></div>';chat.appendChild(row)}
 function removeTyping(){document.getElementById('typing')?.remove()}
 function resizeInput(){input.style.height='auto';input.style.height=Math.min(Math.max(input.scrollHeight,42),180)+'px'}
@@ -169,10 +183,63 @@ function showImagePreview(dataUrl){pendingImage=dataUrl;imagePreview.hidden=fals
 function clearImage(){pendingImage=null;imageInput.value='';cameraInput.value='';imagePreview.hidden=true;imagePreview.innerHTML=''}
 async function prepareImage(file){if(!file||!file.type.startsWith('image/'))return;if(file.size>12*1024*1024){showToast('Image too large (max 12 MB)');return}try{const src=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file)});const img=await new Promise((resolve,reject)=>{const i=new Image();i.onload=()=>resolve(i);i.onerror=reject;i.src=src});const max=1600,scale=Math.min(1,max/Math.max(img.width,img.height));const c=document.createElement('canvas');c.width=Math.max(1,Math.round(img.width*scale));c.height=Math.max(1,Math.round(img.height*scale));c.getContext('2d').drawImage(img,0,0,c.width,c.height);showImagePreview(c.toDataURL('image/jpeg',.82))}catch{showToast('Could not read that image')}}
 function normalizeError(status,data){if(status===413)return'Pesan atau gambar terlalu besar. Coba kirim versi yang lebih kecil.';if(status===429)return'ZennNyx sedang terlalu sibuk. Coba kirim lagi sebentar lagi.';if(status>=500)return'Maaf, ZennNyx sedang mengalami kendala. Coba kirim lagi.';return data?.error||'Maaf, pesan ini belum bisa diproses. Coba kirim lagi.'}
-function prepareHistoryForRequest(){const copy=messages.map(m=>({role:m.role,content:m.content}));let newestImageIndex=-1;for(let i=copy.length-1;i>=0;i--){if(copy[i].role==='user'&&Array.isArray(copy[i].content)&&copy[i].content.some(p=>p?.type==='image_url')){newestImageIndex=i;break}}return copy.map((m,i)=>{if(m.role!=='user'||!Array.isArray(m.content))return m;if(i===newestImageIndex)return m;const textPart=m.content.find(p=>p?.type==='text'&&typeof p.text==='string');return{role:'user',content:textPart?.text||'User sent an image.'}})}
+function prepareHistoryForRequest(){
+  const copy=messages.map(m=>({
+    role:m.role,
+    content:m.content,
+    sources:Array.isArray(m.sources)?m.sources:[]
+  }));
+
+  let newestImageIndex=-1;
+
+  for(let i=copy.length-1;i>=0;i--){
+    if(
+      copy[i].role==='user' &&
+      Array.isArray(copy[i].content) &&
+      copy[i].content.some(p=>p?.type==='image_url')
+    ){
+      newestImageIndex=i;
+      break
+    }
+  }
+
+  return copy.map((m,i)=>{
+    if(m.role!=='user' || !Array.isArray(m.content)){
+      if(m.role==='assistant'&&m.sources.length){
+        const sourceMemory=m.sources.slice(0,5).map((s,n)=>
+          `[${n+1}] ${s.title||s.url}\n${s.url}`
+        ).join('\n');
+
+        return {
+          role:'assistant',
+          content:`${m.content}\n\n[Web sources used in this previous answer — metadata for continuity only]\n${sourceMemory}`
+        }
+      }
+
+      return {
+        role:m.role,
+        content:m.content
+      }
+    }
+
+    if(i===newestImageIndex)return{role:'user',content:m.content};
+
+    const textPart=m.content.find(
+      p=>p?.type==='text'&&typeof p.text==='string'
+    );
+
+    return{
+      role:'user',
+      content:textPart?.text||'User sent an image.'
+    }
+  })
+}
 async function sendMessage(){
   const text=input.value.trim();
   if((!text&&!pendingImage)||busy||!guardCanSend())return;
+
+  // Prevent a Sources popover from a previous answer from appearing attached to a new answer.
+  document.querySelectorAll('.sources-popover').forEach(el=>el.remove());
   busy=true;
   sendBtn.disabled=true;
   attachBtn.disabled=true;
@@ -203,8 +270,25 @@ async function sendMessage(){
     if(!response.ok)throw new Error(normalizeError(response.status,data));
     const reply=data.reply||'Maaf, ZennNyx tidak menerima jawaban.';
     const elapsed=performance.now()-started;
-    addMessage('assistant',reply,false,elapsed,Boolean(data.thinkHarder),null,Array.isArray(data.sources)?data.sources:[]);
-    messages.push({role:'assistant',content:reply});
+    const responseSources=Array.isArray(data.sources)?data.sources:[];
+    const webSearched=Boolean(data.webSearched);
+
+    addMessage(
+      'assistant',
+      reply,
+      false,
+      elapsed,
+      Boolean(data.thinkHarder),
+      null,
+      responseSources,
+      webSearched
+    );
+
+    messages.push({
+      role:'assistant',
+      content:reply,
+      sources:responseSources
+    });
     if(messages.length>14)messages=messages.slice(-14);
   }catch(error){
     const waitRemaining=Math.max(0,MIN_RESPONSE_DELAY_MS-(performance.now()-started));
