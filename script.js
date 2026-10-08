@@ -48,10 +48,26 @@ function parseTable(lines) {
   if (lines.length < 2 || !/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[1])) return null;
   const split = line => line.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(x=>x.trim());
   const head = split(lines[0]);
-  const body = lines.slice(2).map(split).filter(r=>r.length);
+  if (head.length < 2) return null;
+
+  // Only consecutive pipe rows belong to the table. Never swallow normal prose
+  // that happens to follow the table (the old parser did exactly that).
+  const body = [];
+  let end = 2;
+  while (end < lines.length) {
+    const raw = lines[end];
+    if (!raw.trim()) break;
+    if (!raw.includes('|')) break;
+    const row = split(raw);
+    if (row.length < 2) break;
+    body.push(row);
+    end++;
+  }
+
   const cols = head.length;
   const norm = row => Array.from({length:cols},(_,i)=>row[i]??'');
-  return `<div class="table-wrap"><table><thead><tr>${norm(head).map(c=>`<th>${renderInline(c)}</th>`).join('')}</tr></thead><tbody>${body.map(r=>`<tr>${norm(r).map(c=>`<td>${renderInline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  const html = `<div class="table-wrap"><table><thead><tr>${norm(head).map(c=>`<th>${renderInline(c)}</th>`).join('')}</tr></thead><tbody>${body.map(r=>`<tr>${norm(r).map(c=>`<td>${renderInline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+  return { html, end };
 }
 function renderMarkdown(md='') {
   const lines = String(md).replace(/\r/g,'').split('\n');
@@ -65,7 +81,8 @@ function renderMarkdown(md='') {
       html+=`<div class="code-wrap"><pre class="code-block"><code>${escapeHtml(code)}</code></pre><button class="code-copy" type="button" data-copy-code="${encoded}" aria-label="Copy code">Copy</button></div>`;i=j+1;continue;
     }
     if(i+1<lines.length && lines[i].includes('|')){
-      const table=parseTable(lines.slice(i));if(table){const count=lines.slice(i+2).findIndex(x=>!x.includes('|')&&!/^\s*$/.test(x));const consumed=count<0?lines.length-i:count+2;html+=table;i+=consumed;continue;}
+      const table=parseTable(lines.slice(i));
+      if(table){ html += table.html; i += table.end; continue; }
     }
     const heading=line.match(/^(#{1,4})\s+(.+)$/);if(heading){html+=`<h${heading[1].length}>${renderInline(heading[2])}</h${heading[1].length}>`;i++;continue;}
     if(/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line)){html+='<hr>';i++;continue;}
