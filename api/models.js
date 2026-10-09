@@ -1,48 +1,9 @@
-import { getFreeChatModels } from "../lib/openrouter.js";
-
-const GROQ_MODELS = [
-  { id: "openai/gpt-oss-20b", name: "GPT-OSS 20B", description: "Cepat dan serbaguna", vision: false },
-  { id: "openai/gpt-oss-120b", name: "GPT-OSS 120B", description: "Lebih kuat untuk analisis", vision: false },
-  { id: "qwen/qwen3.8-27b", name: "Qwen 3.8 27B", description: "Multimodal · bisa membaca gambar", vision: true }
-];
-
-const GEMINI_MODELS = [
-  { id: "gemini-3.8-flash", name: "Gemini 3.8 Flash", description: "Coding dan penalaran", vision: true },
-  { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash-Lite", description: "Cepat dan hemat", vision: true }
-];
+import { listAvailableModels } from "../lib/models.js";
 
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
   res.setHeader("Cache-Control", "no-store");
-  const models = [];
-
-  if (process.env.GROQ_API_KEY) {
-    for (const model of GROQ_MODELS) {
-      models.push({ provider: "groq", id: model.id, value: `groq::${model.id}`, name: model.name, description: model.description, vision: model.vision, available: true });
-    }
-  }
-
-  if (process.env.GEMINI_API_KEY) {
-    for (const model of GEMINI_MODELS) {
-      models.push({ provider: "gemini", id: model.id, value: `gemini::${model.id}`, name: model.name, description: model.description, vision: model.vision, available: true });
-    }
-  }
-
-  if (process.env.OPENROUTER_API_KEY) {
-    // Hanya model chat gratis; model keamanan/embedding/dll sudah disaring di lib/openrouter.js.
-    for (const model of await getFreeChatModels()) {
-      models.push({
-        provider: "openrouter",
-        id: model.id,
-        value: `openrouter::${model.id}`,
-        name: model.name,
-        description: "OpenRouter · gratis saat ini",
-        vision: model.vision,
-        available: true
-      });
-    }
-  }
-
+  const models = (await listAvailableModels()).map(({ prior, ...model }) => model);
   return res.status(200).json({
     models,
     providers: {

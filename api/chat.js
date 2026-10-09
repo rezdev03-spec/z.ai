@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { getFreeChatModels, isFreeId, isNonChatModel, pickFallbackModels } from "../lib/openrouter.js";
+import { getFreeChatModels, isFreeId, isNonChatModel } from "../lib/openrouter.js";
+import { GROQ_MODELS, GEMINI_MODELS, listAvailableModels } from "../lib/models.js";
 
 const DAILY_LIMIT = 20;
 const COOLDOWN_MS = 5000;
@@ -8,15 +9,9 @@ const BURST_LIMIT = 3;
 const BURST_COOLDOWN_MS = 10 * 1000;
 const TOTAL_BUDGET_MS = 55 * 1000; // vercel.json: maxDuration 60
 
-const GROQ_ALLOWED = new Set([
-  "openai/gpt-oss-20b",
-  "openai/gpt-oss-120b",
-  "qwen/qwen3.8-27b"
-]);
-const GEMINI_ALLOWED = new Set([
-  "gemini-3.8-flash",
-  "gemini-3.5-flash-lite"
-]);
+const MAX_ATTEMPTS = 4; // model pertama + sampai 3 cadangan otomatis (lintas provider)
+const GROQ_ALLOWED = new Set(GROQ_MODELS.map(m => m.id));
+const GEMINI_ALLOWED = new Set(GEMINI_MODELS.map(m => m.id));
 
 const burstStore = globalThis.__zennnyxBurstStore || new Map();
 globalThis.__zennnyxBurstStore = burstStore;
@@ -486,7 +481,7 @@ async function callGroq(model, messages, prompt, opts, deadline) {
       max_completion_tokens: tokenBudget.groq(opts),
       temperature: opts.thinkHarder ? 0.55 : 0.7
     },
-    deadline.timeout(opts.wantsCode ? 45000 : 28000));
+    deadline.timeout(opts.attemptCap));
   if (!response.ok) { console.error("Groq error:", response.status, upstreamMessage(data)); throw upstreamFail("Groq", response.status, data); }
   const reply = stripThinking(textFromOpenAIResponse(data));
   if (!reply) throw new UpstreamError("Groq: model mengembalikan jawaban kosong. Coba kirim ulang.", { status: 502 });
@@ -502,7 +497,7 @@ async function callGemini(model, messages, prompt, opts, deadline) {
       contents: toGeminiContents(messages),
       generationConfig: { maxOutputTokens: tokenBudget.gemini(opts) }
     },
-    deadline.timeout(opts.wantsCode ? 50000 : 28000));
+    deadline.timeout(opts.attemptCap));
   if (!response.ok) { console.error("Gemini error:", response.status, upstreamMessage(data)); throw upstreamFail("Gemini", response.status, data); }
   if (data?.promptFeedback?.blockReason) {
     throw new UpstreamError(`Gemini menolak pesan ini (${data.promptFeedback.blockReason}). Coba ubah kalimatnya.`, { status: 502, fatal: true });
@@ -528,7 +523,7 @@ async function callOpenRouterOnce(model, messages, promptFor, opts, variant, dea
     Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
     "X-Title": "ZennNyx AI",
     ...(process.env.PUBLIC_APP_URL ? { "HTTP-Referer": process.env.PUBLIC_APP_URL } : {})
-  }, body, deadline.timeout(opts.wantsCode ? 45000 : 28000));
+  }, body, deadline.timeout(opts.attemptCap));
 
   // OpenRouter sering membalas HTTP 200 dengan isi {error:{…}} saat provider upstream gagal.
   const embeddedError = data?.error || data?.choices?.[0]?.error;
@@ -565,27 +560,96 @@ async function callOpenRouterModel(model, messages, promptFor, opts, deadline) {
   throw new UpstreamError("OpenRouter: gagal memproses permintaan.", { status: 502 });
 }
 
-// Model gratis sering penuh/offline. Kalau gagal, coba otomatis sampai 2 model gratis lain.
-async function callOpenRouterWithFallback(choiceModel, messages, promptFor, opts, deadline, hasImage) {
-  const tried = [];
-  let model = choiceModel, firstError = null;
-  for (let n = 0; n < 3; n++) {
+/* ───────────── Kelancaran model + pemilihan otomatis ───────────── */
+
+const HEALTH_WINDOW_MS = 15 * 60 * 1000;
+const serverHealth = globalThis.__zennnyxHealth || new Map();
+globalThis.__zennnyxHealth = serverHealth;
+
+const num = (v, min, max) => Math.min(max, Math.max(min, Number(v) || 0));
+
+// Catatan kelancaran dari browser (localStorage) ikut dipakai karena instance serverless sering "lupa" memori.
+function sanitizeClientHealth(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [key, v] of Object.entries(raw).slice(0, 60)) {
+    if (!/^(groq|gemini|openrouter)::[\w.:/-]{1,140}$/.test(key) || !v || typeof v !== "object") continue;
+    out[key] = { streak: num(v.streak, 0, 10), lastFailAt: num(v.lastFailAt, 0, Date.now()), ms: num(v.ms, 0, 60000), ok: num(v.ok, 0, 1000) };
+  }
+  return out;
+}
+
+function recordHealth(value, ok, ms) {
+  const h = serverHealth.get(value) || { streak: 0, lastFailAt: 0, ms: 0, ok: 0 };
+  if (ok) { h.streak = 0; h.ok = Math.min(1000, h.ok + 1); h.ms = h.ms ? h.ms * 0.6 + ms * 0.4 : ms; }
+  else { h.streak = Math.min(10, h.streak + 1); h.lastFailAt = Date.now(); }
+  serverHealth.set(value, h);
+}
+
+// Makin tinggi makin diutamakan: nilai awal - hukuman gagal (memudar 15 menit) - hukuman lambat + bonus sering sukses.
+function scoreModel(model, clientHealth) {
+  const h = clientHealth[model.value] || serverHealth.get(model.value);
+  let score = model.prior || 50;
+  if (h) {
+    const age = Date.now() - (h.lastFailAt || 0);
+    if (h.streak && age < HEALTH_WINDOW_MS) score -= Math.min(70, h.streak * 28) * (1 - age / HEALTH_WINDOW_MS);
+    if (h.ms) score -= Math.min(25, h.ms / 400);
+    if (h.ok) score += Math.min(4, h.ok * 0.4);
+  }
+  return score;
+}
+
+// Urutan percobaan: pilihan user (kalau bukan "auto") dulu, lalu semua model lain dari yang paling lancar.
+function buildChain(choice, available, hasImage, clientHealth) {
+  const usable = available.filter(m => !hasImage || m.vision);
+  const ranked = [...usable].sort((a, b) => scoreModel(b, clientHealth) - scoreModel(a, clientHealth));
+  const chain = [];
+  if (choice.provider !== "auto") {
+    const value = `${choice.provider}::${choice.model}`;
+    const known = available.find(m => m.value === value) || { provider: choice.provider, id: choice.model, value, vision: false, prior: 50 };
+    if (!hasImage || known.vision) chain.push(known);
+  }
+  for (const m of ranked) if (!chain.some(c => c.value === m.value)) chain.push(m);
+  return chain;
+}
+
+function callCandidate(model, messages, promptFor, opts, deadline) {
+  if (model.provider === "groq") return callGroq(model.id, messages, promptFor(model.id), opts, deadline);
+  if (model.provider === "gemini") return callGemini(model.id, messages, promptFor(model.id), opts, deadline);
+  return callOpenRouterModel(model.id, messages, promptFor, opts, deadline);
+}
+
+// Coba model satu per satu. Error APAPUN (limit, 5xx, timeout, kosong, key salah di satu provider) = lanjut ke model berikutnya.
+async function runWithAutoSwitch(chain, messages, promptFor, opts, deadline) {
+  const attempts = [];
+  const skipProviders = new Set();
+  let firstError = null;
+  for (const model of chain) {
+    if (attempts.length >= MAX_ATTEMPTS) break;
+    if (skipProviders.has(model.provider)) continue;
+    if (attempts.length && deadline.left() < 7000) break;
+    const n = attempts.length;
+    opts.attemptCap = opts.wantsCode ? [44000, 22000, 18000, 18000][n] : [20000, 14000, 12000, 12000][n];
+    const t0 = Date.now();
     try {
-      const reply = await callOpenRouterModel(model, messages, promptFor, opts, deadline);
-      return { reply, model, fallbackFrom: n > 0 ? choiceModel : undefined };
-    } catch (error) {
-      if (!(error instanceof UpstreamError)) throw error;
+      const reply = await callCandidate(model, messages, promptFor, opts, deadline);
+      const ms = Date.now() - t0;
+      recordHealth(model.value, true, ms);
+      attempts.push({ value: model.value, ok: true, ms });
+      return { reply, model, attempts };
+    } catch (raw) {
+      const error = raw instanceof UpstreamError ? raw : new UpstreamError("Kesalahan tak terduga saat memanggil model.", { status: 500 });
+      if (!(raw instanceof UpstreamError)) console.error("model call crashed:", model.value, raw);
+      recordHealth(model.value, false, Date.now() - t0);
+      attempts.push({ value: model.value, ok: false, ms: Date.now() - t0 });
       if (!firstError) firstError = error;
-      tried.push(model);
-      // Masalah yang berlaku untuk SEMUA model (key salah, kuota harian habis, waktu habis): jangan lanjut mencoba.
-      if (error.fatal || error.globalLimit || deadline.left() < 9000) throw error;
-      const next = (await pickFallbackModels(tried, { needVision: hasImage, limit: 1 }))[0];
-      if (!next) throw firstError;
-      model = next;
+      if (error.fatal || error.globalLimit) skipProviders.add(model.provider); // key salah / kuota provider habis: provider lain masih boleh
     }
   }
-  firstError.message += ` Cadangan otomatis (${tried.length - 1} model gratis lain) juga gagal.`;
-  throw firstError;
+  const err = firstError || new UpstreamError("Tidak ada model aktif yang cocok untuk permintaan ini (mis. butuh model yang bisa membaca gambar).", { status: 503 });
+  if (attempts.length > 1) err.message += ` Sudah otomatis mencoba ${attempts.length} model, semuanya gagal.`;
+  err.attempts = attempts;
+  throw err;
 }
 
 /* ───────────── Handler ───────────── */
@@ -614,29 +678,28 @@ export default async function handler(req, res) {
   const last = messages[messages.length - 1];
   if (!last || last.role !== "user") return res.status(400).json({ error: "Pesan user wajib ada." });
 
-  const choice = parseChoice(body.modelChoice || "groq::openai/gpt-oss-20b");
+  const choice = parseChoice(body.modelChoice || "auto::auto");
   if (!choice) return res.status(400).json({ error: "Pilihan model tidak valid." });
 
   const hasImage = messages.some(m => Array.isArray(m.content) && m.content.some(p => p?.type === "image_url"));
-  let chosenModel = choice.model;
-  if (choice.provider === "groq") {
-    if (!process.env.GROQ_API_KEY) return res.status(503).json({ error: "API key Groq belum dipasang di Vercel." });
+  const available = await listAvailableModels();
+  if (!available.length) return res.status(503).json({ error: "Belum ada API key model yang dipasang di Vercel (GROQ_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY)." });
+  const chosenModel = choice.model;
+  if (choice.provider === "auto") {
+    // Server memilih sendiri model paling lancar.
+  } else if (choice.provider === "groq") {
     if (!GROQ_ALLOWED.has(chosenModel)) return res.status(400).json({ error: "Model Groq tidak diizinkan." });
-    if (hasImage && chosenModel !== "qwen/qwen3.8-27b") chosenModel = process.env.GROQ_VISION_MODEL || "qwen/qwen3.8-27b";
   } else if (choice.provider === "gemini") {
-    if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: "Tambahkan GEMINI_API_KEY di Vercel untuk memakai model Gemini." });
     if (!GEMINI_ALLOWED.has(chosenModel)) return res.status(400).json({ error: "Model Gemini tidak diizinkan." });
   } else if (choice.provider === "openrouter") {
-    if (!process.env.OPENROUTER_API_KEY) return res.status(503).json({ error: "Tambahkan OPENROUTER_API_KEY di Vercel untuk memakai OpenRouter." });
     if (!isFreeId(chosenModel)) return res.status(400).json({ error: "Untuk menjaga biaya tetap aman, ZennNyx hanya mengizinkan model OpenRouter bertanda free." });
     if (isNonChatModel(chosenModel)) return res.status(400).json({ error: "Model ini bukan model chat (khusus moderasi/embedding). Pilih model lain." });
-    if (hasImage) {
-      const info = (await getFreeChatModels()).find(m => m.id === chosenModel);
-      if (info && !info.vision) return res.status(400).json({ error: "Model ini tidak bisa membaca gambar. Pilih model yang bertanda \"Bisa menerima gambar\"." });
-    }
   } else {
     return res.status(400).json({ error: "Provider model tidak dikenal." });
   }
+  const clientHealth = sanitizeClientHealth(body.health);
+  const chain = buildChain(choice, available, hasImage, clientHealth);
+  if (!chain.length) return res.status(400).json({ error: "Tidak ada model aktif yang bisa membaca gambar. Kirim tanpa gambar atau pasang API key Gemini/Groq." });
 
   // Jatah dipotong sebelum search/provider dipanggil, supaya request over-limit tidak memakai kredit API.
   const quotaResult = takeDailyQuota(req, res);
@@ -656,16 +719,15 @@ export default async function handler(req, res) {
     const promptFor = model => systemPrompt({ thinkHarder, currentDate, webSources: webResult.sources, wantsWeb, wantsCode }) + modelIdentity(model);
     const deadline = makeDeadline(startedAt);
 
-    let reply = "", usedModel = chosenModel, fallbackFrom;
-    if (choice.provider === "groq") reply = await callGroq(chosenModel, messages, promptFor(chosenModel), opts, deadline);
-    else if (choice.provider === "gemini") reply = await callGemini(chosenModel, messages, promptFor(chosenModel), opts, deadline);
-    else ({ reply, model: usedModel, fallbackFrom } = await callOpenRouterWithFallback(chosenModel, messages, promptFor, opts, deadline, hasImage));
+    const { reply, model: used, attempts } = await runWithAutoSwitch(chain, messages, promptFor, opts, deadline);
+    const failedFirst = attempts[0] && !attempts[0].ok ? chain.find(m => m.value === attempts[0].value) : null;
 
     return res.status(200).json({
       reply: String(reply).trim(),
-      provider: choice.provider,
-      model: usedModel,
-      fallbackFrom,
+      provider: used.provider,
+      model: used.id,
+      fallbackFrom: failedFirst ? failedFirst.id : undefined,
+      attempts,
       thinkHarder,
       hasImage,
       sources: webResult.sources,
@@ -680,6 +742,7 @@ export default async function handler(req, res) {
     const quota = refundQuota(res, quotaResult.before);
     return res.status(known ? Number(error.status) || 502 : 500).json({
       error: known ? error.message : "Ada kendala di server saat menghubungi model AI. Coba kirim ulang.",
+      attempts: known ? error.attempts : undefined,
       quota,
       refunded: true
     });
