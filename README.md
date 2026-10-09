@@ -1,4 +1,4 @@
-# ZennNyx AI v9 — Workspace
+# ZennNyx AI v9.1 — Workspace
 
 Static HTML/CSS/JS client with Vercel serverless API. The UI uses crisp bordered panels, an editorial serif display font, a model picker, isolated project preview, KaTeX math rendering, real web sources, and a 20-message daily quota (WIB).
 
@@ -24,3 +24,12 @@ The API keys stay on the server and are not sent to browser JavaScript.
 
 ## Quota notes
 The server validates a signed cookie with the Jakarta-local calendar date and accepts at most 20 requests per day per browser cookie. A client-side guard mirrors the limit. Because the project has no database/login system, clearing site cookies/storage can reset the per-browser quota; a durable account-wide limit would need a persistent shared store or authentication.
+
+
+## v9.1 fixes
+- Sent images stay visible inline in the user message.
+- Model selection is a square, icon-based popup beside the attachment button. Provider labels are hidden, and Grok-labelled entries are filtered out.
+- Assistant answers use editorial serif typography consistently.
+- KaTeX 0.19.0 is loaded with integrity pins. Display math blocks are normalized and rendered only after attachment to the live DOM.
+- The active model's actual identity is included in the backend prompt, so the assistant should not claim the underlying model was developed by ZennNyx.
+- Daily quota is shown beside CHAT / model in the composer header. Enter sends; Shift+Enter inserts a newline.

@@ -13,6 +13,10 @@ const voiceBtn = $("voiceBtn");
 const attachPopover = $("attachPopover");
 const thinkMenuBtn = $("thinkMenuBtn");
 const modelSelect = $("modelSelect");
+const modelPickerBtn = $("modelPickerBtn");
+const modelPickerPopover = $("modelPickerPopover");
+const modelPickerList = $("modelPickerList");
+const selectedModelIcon = $("selectedModelIcon");
 const sidebar = $("sidebar");
 const sidebarScrim = $("sidebarScrim");
 const previewFrame = $("previewFrame");
@@ -160,8 +164,35 @@ function parseTable(lines) {
   const html=`<div class="table-wrap"><table><thead><tr>${normalise(head).map(x=>`<th>${renderInline(x)}</th>`).join("")}</tr></thead><tbody>${body.map(r=>`<tr>${normalise(r).map(x=>`<td>${renderInline(x)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
   return {html,end};
 }
-function renderMarkdown(markdown="") {
+function normalizeDisplayMath(markdown="") {
   const lines=String(markdown).replace(/\r/g,"").split("\n");
+  const out=[];
+  let inCode=false;
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i];
+    if(/^```/.test(line.trim())){inCode=!inCode;out.push(line);continue;}
+    const trimmed=line.trim();
+    const close=trimmed==="\\["?"\\]":(trimmed==="$$"?"$$":"");
+    if(!inCode&&close){
+      const opener=trimmed;
+      const body=[];
+      let j=i+1;
+      while(j<lines.length&&lines[j].trim()!==close&&!/^```/.test(lines[j].trim())){
+        body.push(lines[j].trim());
+        j++;
+      }
+      if(j<lines.length&&lines[j].trim()===close){
+        out.push(`${opener} ${body.join(" ")} ${close}`);
+        i=j;
+        continue;
+      }
+    }
+    out.push(line);
+  }
+  return out.join("\n");
+}
+function renderMarkdown(markdown="") {
+  const lines=normalizeDisplayMath(markdown).split("\n");
   let html="", i=0;
   while(i<lines.length) {
     const line=lines[i];
@@ -365,7 +396,6 @@ function addMessage(role, content, options={}) {
   const body=document.createElement("div");body.className=role==="assistant"?"answer":"bubble";
   if(role==="assistant"&&!isError) {
     body.innerHTML=renderMarkdown(content);
-    renderMath(body);
   } else if(isError) {
     body.textContent=content;
   } else {
@@ -379,6 +409,7 @@ function addMessage(role, content, options={}) {
   if(role==="assistant"&&!isError)addAssistantActions(row,content,elapsedMs,usedThink,sources,webSearched);
   row.querySelectorAll("[data-copy-code]").forEach(btn=>btn.addEventListener("click",()=>copyText(decodeURIComponent(btn.dataset.copyCode||""),btn)));
   appendMessageElement(row);
+  if(role==="assistant"&&!isError)renderMath(body);
   return row;
 }
 function addTyping() {
@@ -437,46 +468,122 @@ function updateSendState() {
   const remaining=serverQuota&&serverQuota.day===jakartaDay()?serverQuota.remaining:Math.max(0,DAILY_LIMIT-readLocalQuota().used);
   if(remaining<=0) $("composerHint").textContent="Kuota 20 pesan hari ini habis · kembali besok WIB";
   else if(clientGuardRemaining()>0) $("composerHint").textContent="Jeda sebentar sebelum pesan berikutnya";
-  else $("composerHint").textContent="Enter untuk baris baru · Kirim lewat tombol panah";
+  else $("composerHint").textContent="Enter kirim · Shift+Enter baris baru";
   scheduleGuardUnlock();
 }
+
+function modelIconMarkup(model) {
+  const key=`${String(model?.id||"").toLowerCase()} ${String(model?.name||"").toLowerCase()}`;
+  if(/gemini/.test(key)) return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1.8 14.5 9.5 22.2 12l-7.7 2.5L12 22.2l-2.5-7.7L1.8 12l7.7-2.5Z"/></svg>';
+  if(/nvidia/.test(key)) return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12c3.5-7.5 16.5-7.5 20 0-3.5 7.5-16.5 7.5-20 0Z"/><circle cx="12" cy="12" r="4.4"/><circle cx="12" cy="12" r="1.5"/></svg>';
+  if(/qwen/.test(key)) return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 8.3 4.8v9.4L12 21.5l-8.3-4.8V7.3Z"/><path d="M8 8h8v8H8zM8 8l8 8M16 8l-8 8"/></svg>';
+  if(/deepseek/.test(key)) return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8.5c3-4.8 9-5.5 13-1.8 1.4 1.3 2.3 3.1 2.4 5.1.1 2.7-1.9 4.7-4.7 4.7H8.4A5.4 5.4 0 0 1 3 11.1Z"/><path d="M8 11.5c1.6-2.5 5.1-2.5 6.6 0M17.5 7.5l3 1.3-1.2 3"/></svg>';
+  if(/gpt|openai/.test(key)) return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.1 16 5.4v4.5l4 2.3v4.5L16 19l-4 2.2L8 19l-4-2.3v-4.5l4-2.3V5.4Z"/><path d="m8 5.4 8 13.6M16 5.4 8 19M4 12.2h16"/></svg>';
+  if(/llama|meta/.test(key)) return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 14c2-7 6-8 9.5-2s7.5 5 9.5-2M2.5 9c2 7 6 8 9.5 2s7.5-5 9.5 2"/></svg>';
+  return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 14.4 9.6 21.5 12l-7.1 2.4L12 21.5l-2.4-7.1L2.5 12l7.1-2.4Z"/></svg>';
+}
+function displayModelName(model) {
+  return String(model?.name||model?.id||"Model AI")
+    .replace(/^\s*open\s*router\s*[:—-]?\s*/ig,"")
+    .replace(/\bgrok\b/ig,"")
+    .replace(/\s+/g," ")
+    .replace(/^[:—-]+\s*/,"")
+    .trim();
+}
+function renderModelPicker() {
+  if(!modelPickerList)return;
+  modelPickerList.replaceChildren();
+  if(!modelChoices.length) {
+    const empty=document.createElement("div");
+    empty.className="model-picker-empty";
+    empty.textContent="Belum ada model aktif. Pasang API key di Vercel.";
+    modelPickerList.appendChild(empty);
+    return;
+  }
+  for(const model of modelChoices) {
+    const option=document.createElement("button");
+    option.type="button";
+    option.className="model-picker-option";
+    option.setAttribute("role","option");
+    option.setAttribute("aria-selected",String(model.value===activeModel));
+    option.dataset.modelValue=model.value;
+    const icon=document.createElement("span");
+    icon.className="model-option-icon";
+    icon.innerHTML=modelIconMarkup(model);
+    const copy=document.createElement("span");
+    copy.className="model-option-copy";
+    const title=document.createElement("strong");
+    title.textContent=displayModelName(model);
+    const desc=document.createElement("small");
+    desc.textContent=model.vision?"Bisa menerima gambar":(model.provider==="openrouter"?"Gratis saat ini":(model.description||"Model chat"));
+    copy.append(title,desc);
+    const check=document.createElement("span");
+    check.className="model-option-check";
+    check.textContent=model.value===activeModel?"✓":"";
+    option.append(icon,copy,check);
+    modelPickerList.appendChild(option);
+  }
+}
+
 function buildModelOptions(models, providers) {
-  modelChoices=models;
+  modelChoices=models.filter(m=>!/grok|x-ai\//i.test(`${m.id||""} ${m.name||""}`));
   modelSelect.replaceChildren();
-  if(!models.length) {
-    const opt=document.createElement("option");opt.value="";opt.textContent="API key belum dipasang";modelSelect.appendChild(opt);
-    $("modelDescription")?.remove();
+  if(!modelChoices.length) {
+    const opt=document.createElement("option");
+    opt.value="";
+    opt.textContent="API key belum dipasang";
+    modelSelect.appendChild(opt);
     $("sidebarModelName").textContent="Belum aktif";
     $("modelProviderBadge").textContent="SETUP";
-    updateSendState();return;
+    renderModelPicker();
+    updateSendState();
+    return;
   }
+
   const groups=new Map();
-  for(const m of models){if(!groups.has(m.provider))groups.set(m.provider,[]);groups.get(m.provider).push(m);}
-  const names={groq:"Groq",gemini:"Gemini",openrouter:"OpenRouter · gratis"};
+  for(const model of modelChoices){
+    if(!groups.has(model.provider))groups.set(model.provider,[]);
+    groups.get(model.provider).push(model);
+  }
+  const hiddenGroupNames={groq:"Groq",gemini:"Gemini",openrouter:"Gratis"};
   for(const [provider,list] of groups) {
-    const group=document.createElement("optgroup");group.label=names[provider]||provider;
-    for(const m of list) {
-      const option=document.createElement("option");option.value=m.value;
-      option.textContent=`${m.name}${m.vision?" · Vision":""}`;
-      option.title=m.description||m.name;
-      option.dataset.provider=m.provider;option.dataset.model=m.id;
+    const group=document.createElement("optgroup");
+    group.label=hiddenGroupNames[provider]||"Model";
+    for(const model of list) {
+      const option=document.createElement("option");
+      option.value=model.value;
+      option.textContent=`${displayModelName(model)}${model.vision?" · Vision":""}`;
+      option.title=model.description||model.name;
+      option.dataset.provider=model.provider;
+      option.dataset.model=model.id;
       group.appendChild(option);
     }
     modelSelect.appendChild(group);
   }
+
   let saved="";
   try { saved=localStorage.getItem("zennnyx_selected_model")||""; } catch {}
-  activeModel=models.some(m=>m.value===saved)?saved:(models.find(m=>m.value==="groq::openai/gpt-oss-20b")?.value||models[0].value);
+  activeModel=modelChoices.some(m=>m.value===saved)
+    ? saved
+    : (modelChoices.find(m=>m.value==="groq::openai/gpt-oss-20b")?.value||modelChoices[0].value);
   modelSelect.value=activeModel;
   updateModelLabel();
-  $("webStatus").textContent=providers?.webSearch?"Aktif":"Butuh Tavily key";
+  $("webStatus").textContent=providers?.webSearch?"Aktif":"Belum dipasang";
+  renderModelPicker();
   updateSendState();
 }
 function updateModelLabel() {
   const model=modelChoices.find(m=>m.value===activeModel);
-  $("selectedModelLabel").textContent=model?model.name:"Pilih model";
-  $("sidebarModelName").textContent=model?model.name:"Belum aktif";
-  $("modelProviderBadge").textContent=model?(model.provider==="openrouter"?"OR":model.provider.toUpperCase()):"AI";
+  const label=model?displayModelName(model):"Pilih model";
+  $("selectedModelLabel").textContent=label;
+  $("sidebarModelName").textContent=label;
+  $("modelProviderBadge").textContent=model?"AI":"SETUP";
+  if(selectedModelIcon)selectedModelIcon.innerHTML=model?modelIconMarkup(model):modelIconMarkup({name:"AI"});
+  if(modelPickerBtn){
+    modelPickerBtn.title=model?`Model aktif: ${label}`:"Pilih model AI";
+    modelPickerBtn.setAttribute("aria-label",model?`Model aktif ${label}. Klik untuk mengganti model.`:"Pilih model AI");
+  }
+  renderModelPicker();
 }
 async function loadModels() {
   try {
@@ -517,7 +624,7 @@ async function sendMessage() {
   togglePopover(attachPopover,false);
   const imageData=pendingImage;
   const userContent=imageData?[{type:"text",text:text||"Tolong analisis gambar ini."},{type:"image_url",image_url:{url:imageData}}]:text;
-  addMessage("user",text||"Analisis gambar ini.");
+  addMessage("user",text||"Analisis gambar ini.",{imageData});
   messages.push({role:"user",content:userContent});
   input.value="";resizeInput();clearImage();closeKeyboard();
   switchView("chat");
@@ -570,7 +677,7 @@ function renderWelcome() {
 function resetToNewChat() {
   if(busy){showToast("Tunggu respons selesai dulu.");return;}
   messages=[];clearImage();input.value="";resizeInput();thinkHarder=false;updateThinkMenu();
-  togglePopover(attachPopover,false);document.querySelectorAll(".sources-popover").forEach(el=>el.remove());
+  togglePopover(attachPopover,false);togglePopover(modelPickerPopover,false);modelPickerBtn.setAttribute("aria-expanded","false");document.querySelectorAll(".sources-popover").forEach(el=>el.remove());
   chat.replaceChildren();
   // Reload the same documented welcome structure from the HTML template.
   const template=$("welcomeTemplate");
@@ -609,13 +716,36 @@ composer.addEventListener("submit",e=>{e.preventDefault();sendMessage();});
 modelSelect.addEventListener("change",()=>{
   activeModel=modelSelect.value;
   try{localStorage.setItem("zennnyx_selected_model",activeModel);}catch{}
-  updateModelLabel();updateSendState();
+  updateModelLabel();updateSendState();renderModelPicker();
 });
 $("chatTab").addEventListener("click",()=>switchView("chat"));
 $("previewTab").addEventListener("click",()=>{if(activeProject)switchView("preview");});
 $("copyProjectBtn").addEventListener("click",()=>{if(activeProject)copyText(buildSrcdoc(activeProject));});
 $("refreshPreviewBtn").addEventListener("click",()=>{if(activeProject)previewFrame.srcdoc=buildSrcdoc(activeProject);});
-attachBtn.addEventListener("click",e=>{e.stopPropagation();togglePopover(attachPopover,attachPopover.hidden);});
+attachBtn.addEventListener("click",e=>{
+  e.stopPropagation();
+  togglePopover(modelPickerPopover,false);
+  togglePopover(attachPopover,attachPopover.hidden);
+});
+modelPickerBtn.addEventListener("click",e=>{
+  e.stopPropagation();
+  togglePopover(attachPopover,false);
+  togglePopover(modelPickerPopover,modelPickerPopover.hidden);
+  modelPickerBtn.setAttribute("aria-expanded",String(modelPickerPopover.hidden===false));
+});
+modelPickerList.addEventListener("click",e=>{
+  const option=e.target.closest("[data-model-value]");
+  if(!option)return;
+  const chosen=modelChoices.find(m=>m.value===option.dataset.modelValue);
+  if(!chosen)return;
+  activeModel=chosen.value;
+  modelSelect.value=activeModel;
+  try{localStorage.setItem("zennnyx_selected_model",activeModel);}catch{}
+  updateModelLabel();
+  updateSendState();
+  togglePopover(modelPickerPopover,false);
+  modelPickerBtn.setAttribute("aria-expanded","false");
+});
 attachPopover.querySelectorAll(".attach-menu-item").forEach(btn=>btn.addEventListener("click",()=>{
   const action=btn.dataset.action;
   if(action==="camera")cameraInput.click();
@@ -625,7 +755,14 @@ attachPopover.querySelectorAll(".attach-menu-item").forEach(btn=>btn.addEventLis
 imageInput.addEventListener("change",()=>{prepareImage(imageInput.files?.[0]);togglePopover(attachPopover,false);});
 cameraInput.addEventListener("change",()=>{prepareImage(cameraInput.files?.[0]);togglePopover(attachPopover,false);});
 input.addEventListener("input",()=>{resizeInput();updateSendState();});
-input.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.isComposing)requestAnimationFrame(resizeInput);});
+input.addEventListener("keydown",e=>{
+  if(e.key==="Enter"&&!e.isComposing&&!e.shiftKey){
+    e.preventDefault();
+    sendMessage();
+  } else if(e.key==="Enter"&&e.shiftKey){
+    requestAnimationFrame(resizeInput);
+  }
+});
 input.addEventListener("paste",e=>{
   const image=[...(e.clipboardData?.items||[])].find(x=>x.type.startsWith("image/"));
   if(image&&!busy){const file=image.getAsFile();if(file){e.preventDefault();prepareImage(file);}}
@@ -637,6 +774,10 @@ $("newChatTopBtn").addEventListener("click",resetToNewChat);
 newChatBtn.addEventListener("click",resetToNewChat);
 document.addEventListener("click",e=>{
   if(!e.target.closest(".attach-popover")&&!e.target.closest("#attachBtn"))togglePopover(attachPopover,false);
+  if(!e.target.closest(".model-picker-popover")&&!e.target.closest("#modelPickerBtn")){
+    togglePopover(modelPickerPopover,false);
+    modelPickerBtn.setAttribute("aria-expanded","false");
+  }
   if(!e.target.closest(".sources-popover")&&!e.target.closest('[aria-label="Sources"]'))document.querySelectorAll(".sources-popover").forEach(el=>el.remove());
 });
 document.addEventListener("keydown",e=>{
