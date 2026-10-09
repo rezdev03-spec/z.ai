@@ -1,35 +1,47 @@
-# ZennNyx AI v9.1 — Workspace
+# ZennNyx AI v9.2 — Workspace
 
-Static HTML/CSS/JS client with Vercel serverless API. The UI uses crisp bordered panels, an editorial serif display font, a model picker, isolated project preview, KaTeX math rendering, real web sources, and a 20-message daily quota (WIB).
+Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model picker, full-screen website preview, KaTeX math, real web sources, and a 20-message daily quota (WIB).
 
 ## Deploy
-1. Replace project files with this ZIP's files, keeping the `api/` folder structure.
-2. Keep your existing `GROQ_API_KEY`.
-3. Optional: set `GEMINI_API_KEY` to enable Gemini choices.
-4. Optional: set `OPENROUTER_API_KEY` to load currently listed free text models from OpenRouter. The server rejects OpenRouter IDs without the `:free` suffix to avoid selecting a paid route.
-5. Keep/set `TAVILY_API_KEY` if you want live web search and source links.
-6. Optional but recommended: set `RATE_LIMIT_SECRET` to a stable random secret in Vercel Environment Variables. If omitted, the backend signs the daily quota cookie using the first configured provider key.
-7. Redeploy.
+1. Replace the project files with this ZIP's files, keeping the folder structure (`api/`, `lib/`, plus `markdown.js` next to `script.js`).
+2. Environment variables (Vercel → Settings → Environment Variables), then **Redeploy**.
+3. Run `npm run check` locally if you want to syntax-check everything.
 
 ## Environment variables
-- `GROQ_API_KEY` (required only when using Groq models)
-- `GEMINI_API_KEY` (optional; enables Gemini 3.8 Flash and Gemini 3.5 Flash-Lite)
-- `OPENROUTER_API_KEY` (optional; model selector dynamically lists free text models only)
+- `GROQ_API_KEY` (needed for Groq models)
+- `GEMINI_API_KEY` (optional; Gemini models)
+- `OPENROUTER_API_KEY` (optional; the picker lists free **chat** models only)
 - `TAVILY_API_KEY` (optional; live web search)
-- `RATE_LIMIT_SECRET` (optional; stable cookie-signing secret)
+- `RATE_LIMIT_SECRET` (optional but recommended; stable cookie-signing secret)
 - `GROQ_VISION_MODEL` (optional; defaults to `qwen/qwen3.8-27b`)
-- `PUBLIC_APP_URL` (optional; OpenRouter app attribution)
+- `PUBLIC_APP_URL` (optional; OpenRouter attribution)
 
-The API keys stay on the server and are not sent to browser JavaScript.
+API keys stay on the server.
+
+## v9.2 — what changed
+**Errors / OpenRouter**
+- Non-chat models (e.g. *NVIDIA Nemotron Content Safety*, which only answers "User Safety: safe", plus embedding/moderation models) are removed from the list and rejected by the server.
+- If an OpenRouter free model is busy/offline (429, 404, 5xx, empty answer), the server automatically tries up to 2 other free models. The answer shows which model actually replied.
+- Models that refuse a system prompt (e.g. Gemma) are retried automatically with the instructions folded into the user message. `<think>…</think>` blocks are stripped.
+- Real error reasons are shown (invalid key, daily free limit, 1-minute limit, timeout…) instead of one generic message. OpenRouter's account-wide limits (`free-models-per-day` / `-per-min`) get their own explanation, because trying another free model cannot help there.
+- A failed request no longer costs one of the 20 daily messages (the server and the client both give it back).
+- **Kirim ulang** button on every error: your message (text + image) is kept, you can switch model first and resend.
+
+**Web search (Tavily)**
+- Auto mode is much broader than the old keyword list (questions, news, prices, "cari…", follow-ups such as "dan harganya?" use the previous question as context). Coding, math and chit-chat are skipped.
+- New **Web Search** switch in the `+` menu: *Otomatis* (default) or *Selalu cari*.
+- If Tavily fails, the answer now says why (invalid key, plan limit reached, timeout…). `country` is sent in the lowercase form Tavily expects, and a rejected optional parameter triggers a plain retry.
+
+**Markdown & math** (`markdown.js`)
+- LaTeX is extracted *before* Markdown runs, so `x_1`, `a*b` and `\\` are no longer turned into italics. Supports `\( \)`, `\[ \]`, `$ $`, `$$ $$`, bare `\begin{aligned}…`, double-escaped `\\(`, and `[ … ]` blocks.
+- Real nested lists (numbering no longer restarts), code blocks inside list items, `[text](url)` links, table alignment, rows with missing cells.
+- Wide formulas scroll sideways instead of being clipped on the left.
+
+**Layout**
+- Side menu now reaches the bottom of the screen on phones.
+- **Obrolan** (left) and **Pratinjau** (right) sit on the same row.
+- When the AI writes a website, the Pratinjau tab turns on immediately (pulsing dot + "Buka pratinjau layar penuh" button). The preview fills the whole screen area with no box around it, the composer is hidden while previewing, and there is a fullscreen button. Truncated code (cut off at the token limit) still renders.
+- Website requests get a larger output budget and a prompt that asks for one complete, self-contained HTML file.
 
 ## Quota notes
-The server validates a signed cookie with the Jakarta-local calendar date and accepts at most 20 requests per day per browser cookie. A client-side guard mirrors the limit. Because the project has no database/login system, clearing site cookies/storage can reset the per-browser quota; a durable account-wide limit would need a persistent shared store or authentication.
-
-
-## v9.1 fixes
-- Sent images stay visible inline in the user message.
-- Model selection is a square, icon-based popup beside the attachment button. Provider labels are hidden, and Grok-labelled entries are filtered out.
-- Assistant answers use editorial serif typography consistently.
-- KaTeX 0.19.0 is loaded with integrity pins. Display math blocks are normalized and rendered only after attachment to the live DOM.
-- The active model's actual identity is included in the backend prompt, so the assistant should not claim the underlying model was developed by ZennNyx.
-- Daily quota is shown beside CHAT / model in the composer header. Enter sends; Shift+Enter inserts a newline.
+A signed cookie with the Jakarta-local date allows 20 requests/day per browser. Without a database/login, clearing site data resets it.

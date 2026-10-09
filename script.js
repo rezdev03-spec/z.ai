@@ -1,3 +1,4 @@
+/* ZennNyx AI v9.2 — UI. Renderer Markdown/LaTeX ada di markdown.js (dimuat lebih dulu). */
 const $ = id => document.getElementById(id);
 const chat = $("chat");
 const chatView = $("chatView");
@@ -12,6 +13,7 @@ const imagePreview = $("imagePreview");
 const voiceBtn = $("voiceBtn");
 const attachPopover = $("attachPopover");
 const thinkMenuBtn = $("thinkMenuBtn");
+const webMenuBtn = $("webMenuBtn");
 const modelSelect = $("modelSelect");
 const modelPickerBtn = $("modelPickerBtn");
 const modelPickerPopover = $("modelPickerPopover");
@@ -20,11 +22,14 @@ const selectedModelIcon = $("selectedModelIcon");
 const sidebar = $("sidebar");
 const sidebarScrim = $("sidebarScrim");
 const previewFrame = $("previewFrame");
+const previewFrameWrap = $("previewFrameWrap");
 const newChatBtn = $("newChatBtn");
 
 let messages = [];
 let pendingImage = null;
 let thinkHarder = false;
+let webMode = "auto";          // "auto" = server menentukan, "on" = selalu cari
+let webAvailable = false;
 let busy = false;
 let toastTimer = null;
 let recognition = null;
@@ -48,7 +53,8 @@ const icons = {
   dislike: '<svg viewBox="0 0 24 24"><path d="M7 14V3H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3Z"/><path d="M7 3h9.5a2 2 0 0 1 1.9 1.4l2.2 6.5A2 2 0 0 1 18.7 14H14l.7 4.1A3.3 3.3 0 0 1 11.5 22L7 14Z"/></svg>',
   share: '<svg viewBox="0 0 24 24"><path d="M12 16V3m-5 5 5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>',
   link: '<svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1L11 5"/><path d="M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 7 20l1.1-1.1"/></svg>',
-  preview: '<svg viewBox="0 0 24 24"><rect x="2.5" y="3.5" width="19" height="17"/><path d="M2.5 8h19M6 5.8h.1M9 5.8h.1"/></svg>'
+  preview: '<svg viewBox="0 0 24 24"><rect x="2.5" y="3.5" width="19" height="17"/><path d="M2.5 8h19M6 5.8h.1M9 5.8h.1"/></svg>',
+  retry: '<svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.5-5.8M20 4v5h-5"/></svg>'
 };
 
 function jakartaDay(date = new Date()) {
@@ -127,121 +133,11 @@ function recordClientSend() {
   scheduleGuardUnlock();
 }
 
-function escapeHtml(value="") {
-  return String(value).replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
-}
-function escapeAttr(value="") { return escapeHtml(value).replace(/`/g,"&#96;"); }
-function safeUrl(value="") {
-  try { const u=new URL(value); return ["http:","https:"].includes(u.protocol)?u.href:"#"; }
-  catch { return "#"; }
-}
-function renderInline(text) {
-  let s=escapeHtml(text);
-  s=s.replace(/&lt;br\s*\/?&gt;/gi,"<br>");
-  s=s.replace(/`([^`]+)`/g,'<code class="inline-code">$1</code>');
-  s=s.replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>");
-  s=s.replace(/__(.+?)__/g,"<strong>$1</strong>");
-  s=s.replace(/~~(.+?)~~/g,"<del>$1</del>");
-  s=s.replace(/(^|[\s(])(https?:\/\/[^\s<]+)/g,(m,p,url)=>`${p}<a href="${escapeAttr(safeUrl(url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`);
-  s=s.replace(/\*([^*\n]+)\*/g,"<em>$1</em>");
-  s=s.replace(/_([^_\n]+)_/g,"<em>$1</em>");
-  return s;
-}
-function parseTable(lines) {
-  if (lines.length<2 || !/^[|\s]*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[1])) return null;
-  const split=line=>line.trim().replace(/^\|/,"").replace(/\|$/,"").split("|").map(x=>x.trim());
-  const head=split(lines[0]);
-  if(head.length<2)return null;
-  const body=[]; let end=2;
-  while(end<lines.length) {
-    const raw=lines[end];
-    if(!raw.trim() || /^\s*[-*+]\s+/.test(raw) || /^\s*#{1,4}\s+/.test(raw) || /^\s*>/.test(raw))break;
-    if(!/^\s*\|?.+\|.+\|?\s*$/.test(raw))break;
-    const row=split(raw); if(row.length!==head.length)break;
-    body.push(row); end++;
-  }
-  const normalise=row=>Array.from({length:head.length},(_,i)=>row[i]??"");
-  const html=`<div class="table-wrap"><table><thead><tr>${normalise(head).map(x=>`<th>${renderInline(x)}</th>`).join("")}</tr></thead><tbody>${body.map(r=>`<tr>${normalise(r).map(x=>`<td>${renderInline(x)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
-  return {html,end};
-}
-function normalizeDisplayMath(markdown="") {
-  const lines=String(markdown).replace(/\r/g,"").split("\n");
-  const out=[];
-  let inCode=false;
-  for(let i=0;i<lines.length;i++){
-    const line=lines[i];
-    if(/^```/.test(line.trim())){inCode=!inCode;out.push(line);continue;}
-    const trimmed=line.trim();
-    const close=trimmed==="\\["?"\\]":(trimmed==="$$"?"$$":"");
-    if(!inCode&&close){
-      const opener=trimmed;
-      const body=[];
-      let j=i+1;
-      while(j<lines.length&&lines[j].trim()!==close&&!/^```/.test(lines[j].trim())){
-        body.push(lines[j].trim());
-        j++;
-      }
-      if(j<lines.length&&lines[j].trim()===close){
-        out.push(`${opener} ${body.join(" ")} ${close}`);
-        i=j;
-        continue;
-      }
-    }
-    out.push(line);
-  }
-  return out.join("\n");
-}
-function renderMarkdown(markdown="") {
-  const lines=normalizeDisplayMath(markdown).split("\n");
-  let html="", i=0;
-  while(i<lines.length) {
-    const line=lines[i];
-    if(!line.trim()){i++;continue;}
-    if(/^```/.test(line.trim())) {
-      const lang=line.trim().slice(3).trim().toLowerCase();
-      let j=i+1; while(j<lines.length&&!/^```/.test(lines[j].trim()))j++;
-      const code=lines.slice(i+1,j).join("\n");
-      html+=`<div class="code-wrap" data-code-lang="${escapeAttr(lang)}"><div class="code-heading"><span>${escapeHtml(lang||"code")}</span><button class="code-copy" type="button" data-copy-code="${encodeURIComponent(code)}">Salin kode</button></div><pre class="code-block"><code>${escapeHtml(code)}</code></pre></div>`;
-      i=j+1; continue;
-    }
-    if(i+1<lines.length&&lines[i].includes("|")) {
-      const table=parseTable(lines.slice(i));
-      if(table){html+=table.html;i+=table.end;continue;}
-    }
-    const h=line.match(/^(#{1,4})\s+(.+)$/);
-    if(h){html+=`<h${h[1].length}>${renderInline(h[2])}</h${h[1].length}>`;i++;continue;}
-    if(/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(line)){html+="<hr>";i++;continue;}
-    if(/^>\s?/.test(line)){const quote=[];while(i<lines.length&&/^>\s?/.test(lines[i]))quote.push(lines[i++].replace(/^>\s?/,""));html+=`<blockquote>${quote.map(renderInline).join("<br>")}</blockquote>`;continue;}
-    if(/^\s*[-*+]\s+/.test(line)){const items=[];while(i<lines.length&&/^\s*[-*+]\s+/.test(lines[i]))items.push(lines[i++].replace(/^\s*[-*+]\s+/,""));html+=`<ul>${items.map(x=>`<li>${renderInline(x)}</li>`).join("")}</ul>`;continue;}
-    if(/^\s*\d+[.)]\s+/.test(line)){const items=[];while(i<lines.length&&/^\s*\d+[.)]\s+/.test(lines[i]))items.push(lines[i++].replace(/^\s*\d+[.)]\s+/,""));html+=`<ol>${items.map(x=>`<li>${renderInline(x)}</li>`).join("")}</ol>`;continue;}
-    const para=[line.trim()];i++;
-    while(i<lines.length&&lines[i].trim()&&!/^```/.test(lines[i].trim())&&!/^#{1,4}\s+/.test(lines[i])&&!/^\s*[-*+]\s+/.test(lines[i])&&!/^\s*\d+[.)]\s+/.test(lines[i])&&!/^>\s?/.test(lines[i])) {
-      para.push(lines[i].trim());i++;
-    }
-    html+=`<p>${para.map(renderInline).join("<br>")}</p>`;
-  }
-  return `<div class="markdown">${html||"<p></p>"}</div>`;
-}
-function renderMath(root) {
-  if(!root || typeof window.renderMathInElement!=="function")return;
-  try {
-    window.renderMathInElement(root, {
-      delimiters:[
-        {left:"$$",right:"$$",display:true},
-        {left:"\\[",right:"\\]",display:true},
-        {left:"\\(",right:"\\)",display:false},
-        {left:"$",right:"$",display:false}
-      ],
-      throwOnError:false,
-      ignoredTags:["script","noscript","style","textarea","pre","code","option"]
-    });
-  } catch(error) { console.warn("Math render:",error); }
-}
 function showToast(text) {
   let el=document.querySelector(".toast");
   if(!el){el=document.createElement("div");el.className="toast";document.body.appendChild(el);}
   el.textContent=text;el.classList.add("show");
-  clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove("show"),2200);
+  clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove("show"),2600);
 }
 async function copyText(text, button) {
   try {
@@ -266,78 +162,66 @@ function extractUrls(text) {
   return [...new Set(urls)].slice(0, 10);
 }
 function nearBottom() { return window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 500; }
-function appendMessageElement(row) {
+// Pesan baru selalu diperlihatkan. Kalau jawabannya tinggi, tampilkan dari ATASNYA supaya terbaca dari awal
+// (sebelumnya halaman tidak ikut turun kalau jawaban sebelumnya panjang).
+function appendMessageElement(row, {force=true}={}) {
   const wasNearBottom=nearBottom();
   chat.appendChild(row);
-  if(wasNearBottom) row.scrollIntoView({block:"nearest",behavior:"smooth"});
+  if(force||wasNearBottom){
+    const tall=row.getBoundingClientRect().height>window.innerHeight*0.55;
+    row.scrollIntoView({block:tall?"start":"nearest",behavior:"smooth"});
+  }
 }
 
-function extractProjectFiles(content) {
-  const files={html:"",css:"",js:""};
-  const regex=/```([a-zA-Z0-9_#+.-]*)[ \t]*\n([\s\S]*?)```/g;
-  let match;
-  while((match=regex.exec(String(content)))) {
-    const label=match[1].toLowerCase();
-    if(label==="html"||label==="htm")files.html=match[2].trim();
-    else if(label==="css"||label==="scss")files.css=match[2].trim();
-    else if(["js","javascript","mjs"].includes(label))files.js=match[2].trim();
-  }
-  if(!files.html) {
-    const raw=String(content).trim();
-    if(/<!doctype html|<html[\s>]/i.test(raw))files.html=raw;
-  }
-  return files.html?files:null;
-}
-function buildSrcdoc(project) {
-  let html=project.html||"<!doctype html><html><head><meta charset='utf-8'></head><body></body></html>";
-  if(!/<html[\s>]/i.test(html)) html=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>${html}</body></html>`;
-  const css=(project.css||"").replace(/<\/style/gi,"<\\/style");
-  const js=(project.js||"").replace(/<\/script/gi,"<\\/script");
-  const styleTag=css?`<style>\n${css}\n</style>`:"";
-  const scriptTag=js?`<script>\n${js}\n<\/script>`:"";
-  if(styleTag) {
-    if(/<\/head>/i.test(html)) {
-      html=html.replace(/<\/head>/i,`${styleTag}</head>`);
-    } else if(/<head[\\s>]/i.test(html)) {
-      html=html.replace(/<head([^>]*)>/i,`$&${styleTag}`);
-    } else if(/<html[\\s>]/i.test(html)) {
-      html=html.replace(/<html([^>]*)>/i,`$&<head>${styleTag}</head>`);
-    } else {
-      html=`<!doctype html><html><head>${styleTag}</head><body>${html}</body></html>`;
-    }
-  }
-  if(scriptTag) {
-    if(/<\/body>/i.test(html))html=html.replace(/<\/body>/i,`${scriptTag}</body>`);
-    else html+=scriptTag;
-  }
-  return html;
-}
-function openPreview(project, title="Pratinjau proyek") {
+/* ───────────── Pratinjau website ───────────── */
+
+// Mendaftarkan proyek dari jawaban AI: tab Pratinjau langsung aktif (tanpa harus klik tombol dulu).
+function registerProject(project, title="Pratinjau website") {
   activeProject=project;
   previewFrame.srcdoc=buildSrcdoc(project);
   $("previewTitle").textContent=title;
-  $("previewTab").disabled=false;
-  $("previewTab").classList.add("has-preview");
   const files=[];
   if(project.html)files.push("index.html");
   if(project.css)files.push("style.css");
   if(project.js)files.push("script.js");
-  $("projectFilesList").replaceChildren(...files.map(name=>{const n=document.createElement("span");n.className="project-file-chip";n.textContent=name;return n;}));
-  $("workspaceCaption").textContent="PREVIEW SANDBOX";
+  $("previewMeta").textContent=`${files.join(" · ")} · sandbox terisolasi`;
+  $("previewTab").disabled=false;
+  $("previewTab").classList.add("has-preview","fresh");
+}
+function openPreview(project, title="Pratinjau website") {
+  if(project&&project!==activeProject)registerProject(project,title);
+  if(!activeProject)return;
   switchView("preview");
 }
 function switchView(view) {
   const isPreview=view==="preview"&&!!activeProject;
   chatView.hidden=isPreview;
   previewView.hidden=!isPreview;
+  document.body.classList.toggle("preview-mode",isPreview);
   $("chatTab").classList.toggle("active",!isPreview);
   $("previewTab").classList.toggle("active",isPreview);
   $("chatTab").setAttribute("aria-selected",String(!isPreview));
   $("previewTab").setAttribute("aria-selected",String(isPreview));
+  if(isPreview)$("previewTab").classList.remove("fresh");
   $("composeMode").textContent=isPreview?"PREVIEW":"CHAT";
   $("workspaceCaption").textContent=isPreview?"PREVIEW SANDBOX":"RUANG KERJA PRIBADI";
+  if(!isPreview&&document.fullscreenElement)document.exitFullscreen?.().catch(()=>{});
+  window.scrollTo(0,0);
 }
-function addAssistantActions(row, content, elapsedMs, usedThink, sources=[], webSearched=false) {
+function toggleFullscreen() {
+  const el=previewFrameWrap;
+  if(document.fullscreenElement||document.webkitFullscreenElement){
+    (document.exitFullscreen||document.webkitExitFullscreen).call(document);
+    return;
+  }
+  const request=el.requestFullscreen||el.webkitRequestFullscreen;
+  if(!request){showToast("Layar penuh tidak didukung browser ini.");return;}
+  Promise.resolve(request.call(el)).catch(()=>showToast("Layar penuh tidak didukung browser ini."));
+}
+
+/* ───────────── Pesan ───────────── */
+
+function addAssistantActions(row, content, elapsedMs, usedThink, sources=[], webSearched=false, notes=[]) {
   const wrap=document.createElement("div");wrap.className="assistant-actions";
   const makeButton=(label,icon,fn)=>{
     const b=document.createElement("button");b.type="button";b.className="action-btn";b.innerHTML=`<span class="action-icon">${icon}</span><span class="action-label">${label}</span>`;b.addEventListener("click",fn);return b;
@@ -374,7 +258,8 @@ function addAssistantActions(row, content, elapsedMs, usedThink, sources=[], web
 
   const project=extractProjectFiles(content);
   if(project) {
-    const preview=makeButton("Preview",icons.preview,()=>openPreview(project,"Preview hasil kode"));
+    const preview=makeButton("Pratinjau",icons.preview,()=>openPreview(project,"Pratinjau website"));
+    preview.classList.add("primary");
     wrap.appendChild(preview);
   }
 
@@ -382,22 +267,28 @@ function addAssistantActions(row, content, elapsedMs, usedThink, sources=[], web
   const meta=document.createElement("div");meta.className="answer-meta";
   meta.textContent=`Dibuat ${elapsed} dtk${usedThink?" · Think Harder":""}${webSearched?" · Web dicari":""}`;
   const answer=row.querySelector(".answer");
-  answer.prepend(meta);
-  wrap.querySelectorAll("[data-copy-code]").forEach(()=>{});
+  const noteEls=notes.map(text=>{const n=document.createElement("div");n.className="answer-note";n.textContent=text;return n;});
+  const top=[meta,...noteEls];
+  if(project){
+    // Tombol pratinjau ditaruh di ATAS jawaban, supaya langsung kelihatan tanpa menggulir melewati kode panjang.
+    const cta=document.createElement("button");cta.type="button";cta.className="preview-cta";
+    cta.innerHTML=`<span class="action-icon">${icons.preview}</span><span>Buka pratinjau layar penuh</span><span aria-hidden="true">→</span>`;
+    cta.addEventListener("click",()=>openPreview(project,"Pratinjau website"));
+    top.push(cta);
+  }
+  answer.prepend(...top);
   row.appendChild(wrap);
   const disclaimer=document.createElement("div");disclaimer.className="answer-disclaimer";disclaimer.textContent="ZennNyx AI bisa keliru. Cek ulang info penting.";row.appendChild(disclaimer);
 }
 
 function addMessage(role, content, options={}) {
-  const {isError=false,elapsedMs=0,usedThink=false,imageData=null,sources=[],webSearched=false}=options;
+  const {elapsedMs=0,usedThink=false,imageData=null,sources=[],webSearched=false,notes=[]}=options;
   const row=document.createElement("article");
-  row.className=`message ${role}${isError?" error":""}`;
+  row.className=`message ${role}`;
   row.style.animation="rise-in .22s ease both";
   const body=document.createElement("div");body.className=role==="assistant"?"answer":"bubble";
-  if(role==="assistant"&&!isError) {
+  if(role==="assistant") {
     body.innerHTML=renderMarkdown(content);
-  } else if(isError) {
-    body.textContent=content;
   } else {
     body.textContent=content;
     body.style.whiteSpace="pre-wrap";
@@ -406,10 +297,31 @@ function addMessage(role, content, options={}) {
     const img=document.createElement("img");img.className="message-image";img.src=imageData;img.alt="Lampiran gambar";body.prepend(img);
   }
   row.appendChild(body);
-  if(role==="assistant"&&!isError)addAssistantActions(row,content,elapsedMs,usedThink,sources,webSearched);
+  if(role==="assistant")addAssistantActions(row,content,elapsedMs,usedThink,sources,webSearched,notes);
   row.querySelectorAll("[data-copy-code]").forEach(btn=>btn.addEventListener("click",()=>copyText(decodeURIComponent(btn.dataset.copyCode||""),btn)));
   appendMessageElement(row);
-  if(role==="assistant"&&!isError)renderMath(body);
+  if(role==="assistant")hydrateMath(body);
+  return row;
+}
+
+// Pesan error + tombol "Kirim ulang" supaya tidak perlu mengetik ulang.
+function addErrorMessage(text, retry) {
+  const row=document.createElement("article");
+  row.className="message assistant error";
+  row.style.animation="rise-in .22s ease both";
+  const body=document.createElement("div");body.className="answer";
+  const msg=document.createElement("div");msg.className="error-text";msg.textContent=text;
+  body.appendChild(msg);
+  if(retry) {
+    const actions=document.createElement("div");actions.className="error-actions";
+    const btn=document.createElement("button");btn.type="button";btn.className="retry-btn";
+    btn.innerHTML=`<span class="action-icon">${icons.retry}</span><span>Kirim ulang</span>`;
+    btn.addEventListener("click",()=>retry(row));
+    const hint=document.createElement("small");hint.textContent="Pesanmu masih tersimpan. Boleh ganti model dulu, lalu kirim ulang.";
+    actions.append(btn,hint);body.appendChild(actions);
+  }
+  row.appendChild(body);
+  appendMessageElement(row);
   return row;
 }
 function addTyping() {
@@ -424,6 +336,19 @@ function togglePopover(el, open) {
 }
 function updateThinkMenu() {thinkMenuBtn.setAttribute("aria-pressed",String(thinkHarder));}
 function setThinkHarder(value) {thinkHarder=Boolean(value);updateThinkMenu();togglePopover(attachPopover,false);showToast(thinkHarder?"Think Harder aktif":"Think Harder nonaktif");}
+
+function updateWebMenu() {
+  webMenuBtn.setAttribute("aria-pressed",String(webMode==="on"));
+  $("webMenuHint").textContent=!webAvailable?"Belum aktif · pasang TAVILY_API_KEY":(webMode==="on"?"Selalu mencari di web":"Otomatis · ketuk untuk selalu cari");
+  $("webStatus").textContent=!webAvailable?"Belum dipasang":(webMode==="on"?"Selalu":"Otomatis");
+}
+function setWebMode(mode) {
+  if(!webAvailable){showToast("Web Search belum aktif: TAVILY_API_KEY belum dipasang di Vercel.");togglePopover(attachPopover,false);return;}
+  webMode=mode==="on"?"on":"auto";
+  try{localStorage.setItem("zennnyx_web_mode",webMode);}catch{}
+  updateWebMenu();togglePopover(attachPopover,false);
+  showToast(webMode==="on"?"Web Search: selalu mencari":"Web Search: otomatis");
+}
 function showImagePreview(url) {
   pendingImage=url;imagePreview.hidden=false;
   imagePreview.innerHTML=`<img src="${url}" alt="Gambar terpilih"><button type="button" id="removeImage" aria-label="Hapus gambar">×</button>`;
@@ -443,9 +368,11 @@ async function prepareImage(file) {
   } catch {showToast("Gagal membaca gambar.");}
 }
 function normalizeError(status,data) {
-  if(status===429)return data?.error||"Limit atau jeda penggunaan tercapai. Coba lagi nanti.";
+  if(data?.error)return data.error;
+  if(status===429)return "Limit atau jeda penggunaan tercapai. Coba lagi nanti.";
   if(status===413)return "Pesan atau gambarnya terlalu besar. Coba ukuran yang lebih kecil.";
-  return data?.error||"Ada kendala saat memproses pesan.";
+  if(status===504)return "Server terlalu lama menjawab. Coba kirim ulang atau pilih model yang lebih cepat.";
+  return "Ada kendala saat memproses pesan.";
 }
 function prepareHistoryForRequest() {
   const copy=messages.map(m=>({role:m.role,content:m.content,sources:Array.isArray(m.sources)?m.sources:[]}));
@@ -526,8 +453,10 @@ function renderModelPicker() {
 }
 
 function buildModelOptions(models, providers) {
-  modelChoices=models.filter(m=>!/grok|x-ai\//i.test(`${m.id||""} ${m.name||""}`));
+  modelChoices=models.filter(m=>!/grok|x-ai\//i.test(`${m.id||""} ${m.name||""}`));
   modelSelect.replaceChildren();
+  webAvailable=Boolean(providers?.webSearch);
+  updateWebMenu();
   if(!modelChoices.length) {
     const opt=document.createElement("option");
     opt.value="";
@@ -568,7 +497,6 @@ function buildModelOptions(models, providers) {
     : (modelChoices.find(m=>m.value==="groq::openai/gpt-oss-20b")?.value||modelChoices[0].value);
   modelSelect.value=activeModel;
   updateModelLabel();
-  $("webStatus").textContent=providers?.webSearch?"Aktif":"Belum dipasang";
   renderModelPicker();
   updateSendState();
 }
@@ -606,28 +534,59 @@ async function loadQuota() {
   updateQuota();
   updateSendState();
 }
+
+/* ───────────── Kirim / kirim ulang ───────────── */
+
 async function sendMessage() {
   const text=input.value.trim();
   if((!text&&!pendingImage)||busy)return;
   if(!modelChoices.length){showToast("Belum ada model aktif. Periksa API key di Vercel.");return;}
+  const imageData=pendingImage;
+  const active=modelChoices.find(m=>m.value===activeModel);
+  if(imageData&&active&&!active.vision&&active.provider==="openrouter"){
+    showToast("Model ini tidak bisa membaca gambar. Pilih model yang bertanda \"Bisa menerima gambar\".");
+    return;
+  }
   if(!clientCanSend()){
     updateQuota();
     showToast(serverQuota?.remaining===0?"Jatah 20 pesan hari ini habis.": "Tunggu sebentar sebelum mengirim lagi.");
     return;
   }
-  busy=true;
-  updateSendState();
-  attachBtn.disabled=true;voiceBtn.disabled=true;
-  recordClientSend();
   document.getElementById("welcome")?.remove();
   document.querySelectorAll(".sources-popover").forEach(el=>el.remove());
   togglePopover(attachPopover,false);
-  const imageData=pendingImage;
   const userContent=imageData?[{type:"text",text:text||"Tolong analisis gambar ini."},{type:"image_url",image_url:{url:imageData}}]:text;
   addMessage("user",text||"Analisis gambar ini.",{imageData});
-  messages.push({role:"user",content:userContent});
   input.value="";resizeInput();clearImage();closeKeyboard();
   switchView("chat");
+  await runRequest(userContent);
+}
+
+async function retryRequest(errorRow, userContent) {
+  if(busy)return;
+  if(!clientCanSend()){
+    updateQuota();
+    showToast(serverQuota?.remaining===0?"Jatah 20 pesan hari ini habis.":"Tunggu sebentar sebelum mengirim lagi.");
+    return;
+  }
+  const active=modelChoices.find(m=>m.value===activeModel);
+  const hasImage=Array.isArray(userContent)&&userContent.some(p=>p?.type==="image_url");
+  if(hasImage&&active&&!active.vision&&active.provider==="openrouter"){
+    showToast("Pesan ini berisi gambar. Pilih model yang bertanda \"Bisa menerima gambar\".");
+    return;
+  }
+  errorRow.remove();
+  switchView("chat");
+  await runRequest(userContent);
+}
+
+async function runRequest(userContent) {
+  busy=true;
+  updateSendState();
+  attachBtn.disabled=true;voiceBtn.disabled=true;
+  const quotaBackup=readLocalQuota();
+  recordClientSend();
+  messages.push({role:"user",content:userContent});
   addTyping();
   const started=performance.now();
   let responseData={};
@@ -636,7 +595,7 @@ async function sendMessage() {
       method:"POST",
       headers:{"Content-Type":"application/json"},
       credentials:"same-origin",
-      body:JSON.stringify({messages:prepareHistoryForRequest(),thinkHarder,modelChoice:activeModel})
+      body:JSON.stringify({messages:prepareHistoryForRequest(),thinkHarder,modelChoice:activeModel,webSearch:webMode})
     });
     responseData=await response.json().catch(()=>({}));
     if(responseData.quota)updateQuota(responseData.quota);
@@ -647,43 +606,53 @@ async function sendMessage() {
     const reply=responseData.reply||"Hmm, model nggak mengembalikan jawaban.";
     const elapsed=performance.now()-started;
     const sources=Array.isArray(responseData.sources)?responseData.sources:[];
-    addMessage("assistant",reply,{elapsedMs:elapsed,usedThink:Boolean(responseData.thinkHarder),sources,webSearched:Boolean(responseData.webSearched)});
+    const notes=[];
+    if(responseData.searchError)notes.push(`Web search tidak jalan: ${responseData.searchError}`);
+    if(responseData.fallbackFrom&&responseData.model){
+      const nameOf=id=>{const m=modelChoices.find(x=>x.id===id);return m?displayModelName(m):String(id).replace(/:free$/,"").split("/").pop();};
+      notes.push(`${nameOf(responseData.fallbackFrom)} sedang bermasalah, jadi dijawab otomatis oleh ${nameOf(responseData.model)}.`);
+    }
+    addMessage("assistant",reply,{elapsedMs:elapsed,usedThink:Boolean(responseData.thinkHarder),sources,webSearched:Boolean(responseData.webSearched),notes});
     messages.push({role:"assistant",content:reply,sources});
     if(messages.length>16)messages=messages.slice(-16);
-    if(responseData.model) {
-      const model=modelChoices.find(m=>m.id===responseData.model);
-      if(model){$("selectedModelLabel").textContent=model.name;}
+    const project=extractProjectFiles(reply);
+    if(project){
+      registerProject(project,"Pratinjau website");
+      showToast("Website siap — buka tab Pratinjau");
     }
     $("workspaceCaption").textContent="RUANG KERJA PRIBADI";
   } catch(error) {
     const delay=Math.max(0,900-(performance.now()-started));
     if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
     removeTyping();
-    addMessage("assistant",error.message||"Ada masalah saat memproses permintaan.",{isError:true});
-    // Keep the attempted user message visible in conversation, but don't send it to the model history.
+    // Pesan user tidak masuk riwayat model kalau gagal; tetap tampil di layar dan bisa dikirim ulang.
     if(messages.length&&messages[messages.length-1]?.role==="user")messages.pop();
+    // Jatah dikembalikan: error provider bukan salah user (server juga sudah mengembalikannya).
+    if(responseData.rejected){
+      const s=readLocalQuota();s.used=quotaBackup.used;writeLocalQuota(s);
+    } else {
+      writeLocalQuota(quotaBackup);
+      if(!responseData.quota)loadQuota(); // gagal jaringan: sinkronkan jatah dari server
+    }
+    const exhausted=Boolean(responseData.quota)&&Number(responseData.quota.remaining)<=0;
+    addErrorMessage(error.message||"Ada masalah saat memproses permintaan.",exhausted?null:row=>retryRequest(row,userContent));
   } finally {
     busy=false;attachBtn.disabled=false;voiceBtn.disabled=false;
     updateQuota(responseData.quota);
     updateSendState();
   }
 }
+
 function closeKeyboard() {input.blur();}
-function renderWelcome() {
-  const source=document.querySelector(".welcome-template");
-  if(source)return source.content.cloneNode(true);
-  return null;
-}
 function resetToNewChat() {
   if(busy){showToast("Tunggu respons selesai dulu.");return;}
   messages=[];clearImage();input.value="";resizeInput();thinkHarder=false;updateThinkMenu();
   togglePopover(attachPopover,false);togglePopover(modelPickerPopover,false);modelPickerBtn.setAttribute("aria-expanded","false");document.querySelectorAll(".sources-popover").forEach(el=>el.remove());
   chat.replaceChildren();
-  // Reload the same documented welcome structure from the HTML template.
   const template=$("welcomeTemplate");
   if(template)chat.appendChild(template.content.cloneNode(true));
   bindSuggestions();
-  activeProject=null;previewFrame.srcdoc="";$("previewTab").disabled=true;$("previewTab").classList.remove("has-preview");
+  activeProject=null;previewFrame.srcdoc="";$("previewTab").disabled=true;$("previewTab").classList.remove("has-preview","fresh");
   switchView("chat");updateSendState();
 }
 function bindSuggestions() {
@@ -722,6 +691,7 @@ $("chatTab").addEventListener("click",()=>switchView("chat"));
 $("previewTab").addEventListener("click",()=>{if(activeProject)switchView("preview");});
 $("copyProjectBtn").addEventListener("click",()=>{if(activeProject)copyText(buildSrcdoc(activeProject));});
 $("refreshPreviewBtn").addEventListener("click",()=>{if(activeProject)previewFrame.srcdoc=buildSrcdoc(activeProject);});
+$("fullscreenBtn").addEventListener("click",toggleFullscreen);
 attachBtn.addEventListener("click",e=>{
   e.stopPropagation();
   togglePopover(modelPickerPopover,false);
@@ -751,6 +721,7 @@ attachPopover.querySelectorAll(".attach-menu-item").forEach(btn=>btn.addEventLis
   if(action==="camera")cameraInput.click();
   if(action==="photo")imageInput.click();
   if(action==="think")setThinkHarder(!thinkHarder);
+  if(action==="web")setWebMode(webMode==="on"?"auto":"on");
 }));
 imageInput.addEventListener("change",()=>{prepareImage(imageInput.files?.[0]);togglePopover(attachPopover,false);});
 cameraInput.addEventListener("change",()=>{prepareImage(cameraInput.files?.[0]);togglePopover(attachPopover,false);});
@@ -771,7 +742,7 @@ $("menuBtn").addEventListener("click",()=>{sidebar.classList.add("open");sidebar
 $("sidebarCloseBtn").addEventListener("click",closeSidebar);
 sidebarScrim.addEventListener("click",closeSidebar);
 $("newChatTopBtn").addEventListener("click",resetToNewChat);
-newChatBtn.addEventListener("click",resetToNewChat);
+newChatBtn.addEventListener("click",()=>{closeSidebar();resetToNewChat();});
 document.addEventListener("click",e=>{
   if(!e.target.closest(".attach-popover")&&!e.target.closest("#attachBtn"))togglePopover(attachPopover,false);
   if(!e.target.closest(".model-picker-popover")&&!e.target.closest("#modelPickerBtn")){
@@ -790,11 +761,18 @@ if(window.visualViewport){
 }
 input.addEventListener("focus",()=>{updateKeyboardInset();setTimeout(updateKeyboardInset,100);setTimeout(updateKeyboardInset,300);setTimeout(()=>input.scrollIntoView({block:"nearest",behavior:"smooth"}),80);});
 input.addEventListener("blur",()=>setTimeout(updateKeyboardInset,140));
+// Cadangan: kalau KaTeX telat/terlambat termuat, render ulang rumus yang masih berupa teks.
+window.addEventListener("load",()=>hydrateMath(document));
+let refitTimer=null;
+window.addEventListener("resize",()=>{clearTimeout(refitTimer);refitTimer=setTimeout(()=>refitAllMath(),150);});
+
 const welcomeTemplate=$("welcomeTemplate");
 if(!chat.querySelector("#welcome")&&welcomeTemplate)chat.appendChild(welcomeTemplate.content.cloneNode(true));
+try{if(localStorage.getItem("zennnyx_web_mode")==="on")webMode="on";}catch{}
 setupRecognition();
 bindSuggestions();
 updateThinkMenu();
+updateWebMenu();
 resizeInput();
 updateQuota();
 updateKeyboardInset();
