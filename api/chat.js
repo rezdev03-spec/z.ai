@@ -413,7 +413,10 @@ export default async function handler(req, res) {
   const wantsCode = /\b(buat|bikin|buatkan|build|create|website|web app|landing page|html|css|javascript|react|komponen|preview|aplikasi)\b/i.test(userQuery);
   const currentDate = currentDateJakarta();
   const webResult = wantsWeb ? await searchWeb(userQuery) : { used: false, sources: [] };
-  const prompt = systemPrompt({ thinkHarder: body.thinkHarder === true, currentDate, webSources: webResult.sources, wantsWeb, wantsCode });
+  const rawModelId=String(chosenModel||"model AI").replace(/:free$/,"");
+  const shortModelName=rawModelId.split("/").pop().replace(/[-_]/g," ").replace(/\b\w/g,c=>c.toUpperCase());
+  const modelIdentity=`${shortModelName} (ID model: ${rawModelId})`;
+  const prompt = `${systemPrompt({ thinkHarder: body.thinkHarder === true, currentDate, webSources: webResult.sources, wantsWeb, wantsCode })}\n\nIDENTITAS MODEL AKTIF: ${modelIdentity}. ZennNyx AI adalah nama aplikasi/asisten, bukan klaim bahwa model dasarnya dikembangkan oleh ZennNyx. Jika user bertanya model apa yang dipakai, jawab jujur dengan menyebut model aktif tersebut. Jangan mengarang identitas atau mengaku sebagai model buatan ZennNyx.`;
   const thinkHarder = body.thinkHarder === true;
 
   try {
