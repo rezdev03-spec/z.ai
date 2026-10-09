@@ -305,9 +305,146 @@ async function sendMessage(){
   }
 }
 function updateSendState(){const hasContent=Boolean(input.value.trim()||pendingImage);sendBtn.disabled=busy||!hasContent||!guardCanSend();scheduleGuardUnlock()}
+
+// Mobile keyboard fallback: keep the fixed composer above the on-screen keyboard
+// on browsers where the visual viewport does not automatically reposition fixed UI.
+function updateKeyboardInset(){
+  if(!window.visualViewport)return;
+
+  const vv=window.visualViewport;
+  const keyboardInset=Math.max(
+    0,
+    window.innerHeight-vv.height-vv.offsetTop
+  );
+
+  document.documentElement.style.setProperty(
+    '--keyboard-inset',
+    `${Math.round(keyboardInset)}px`
+  );
+}
+
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize',updateKeyboardInset,{passive:true});
+  window.visualViewport.addEventListener('scroll',updateKeyboardInset,{passive:true});
+}
+
+input.addEventListener('focus',()=>{
+  updateKeyboardInset();
+  setTimeout(updateKeyboardInset,80);
+  setTimeout(updateKeyboardInset,260);
+});
+
+input.addEventListener('blur',()=>{
+  setTimeout(updateKeyboardInset,140);
+});
+
 function setupRecognition(){const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){voiceBtn.addEventListener('click',()=>showToast('Voice input belum didukung browser ini.'));return}recognition=new SR();recognition.lang='id-ID';recognition.interimResults=true;recognition.continuous=false;recognition.maxAlternatives=1;let baseText='';recognition.onstart=()=>{recording=true;voiceBtn.classList.add('recording');voiceBtn.setAttribute('aria-label','Stop voice input');baseText=input.value.trim()};recognition.onresult=e=>{const transcript=[...e.results].map(r=>r[0]?.transcript||'').join('');input.value=(baseText?baseText+' ':'')+transcript;resizeInput();updateSendState()};recognition.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed')showToast('Izin mikrofon ditolak.');else if(e.error!=='aborted')showToast('Voice input gagal digunakan.');recording=false;voiceBtn.classList.remove('recording');voiceBtn.setAttribute('aria-label','Voice input')};recognition.onend=()=>{recording=false;voiceBtn.classList.remove('recording');voiceBtn.setAttribute('aria-label','Voice input');updateSendState()};voiceBtn.addEventListener('click',()=>{if(busy)return;if(recording){recognition.stop();return}try{recognition.start()}catch{}})}
 function toggleAbout(open){togglePopover(aboutPopover,open)}
-function resetToNewChat(){if(busy){showToast('Tunggu sampai ZennNyx selesai merespons.');return}messages=[];clearImage();input.value='';resizeInput();thinkHarder=false;updateThinkMenu();togglePopover(attachPopover,false);toggleAbout(false);document.getElementById('typing')?.remove();chat.innerHTML='';const welcome=document.createElement('div');welcome.id='welcome';welcome.className='welcome';welcome.innerHTML=`<div class="welcome-mark">Z</div><h1>How can I help?</h1><p>Ask anything, write something, or build an idea.</p><div class="suggestions"><button type="button" data-prompt="Explain something interesting to me.">Explain something</button><button type="button" data-prompt="Help me write a short paragraph.">Help me write</button><button type="button" data-prompt="Give me a creative idea for a website.">Give me an idea</button></div>`;chat.appendChild(welcome);bindSuggestions();updateSendState()}
+function renderWelcome(){
+  const welcome=document.createElement('div');
+  welcome.id='welcome';
+  welcome.className='welcome';
+  welcome.innerHTML=`<div id="welcome" class="welcome">
+  <div class="welcome-hero">
+    <div class="welcome-eyebrow"><span class="welcome-eyebrow-dot"></span> PERSONAL AI ASSISTANT</div>
+    <div class="welcome-mark">Z</div>
+    <h1>Ngobrol aja. Gue siap bantu.</h1>
+    <p>ZennNyx AI adalah ruang chat pribadi buat cari jawaban, cari info terbaru, baca gambar, mikirin ide, sampai bantu ngulik hal teknis.</p>
+  </div>
+
+  <div class="welcome-docs" aria-label="Tentang ZennNyx AI">
+    <article class="welcome-doc-card">
+      <div class="welcome-card-top">
+        <span class="welcome-card-kicker">01 / APA ITU</span>
+        <span class="welcome-card-icon" aria-hidden="true">
+          <svg viewBox="0 0 64 64"><path d="M12 45V19c0-4 3-7 7-7h26c4 0 7 3 7 7v26c0 4-3 7-7 7H19c-4 0-7-3-7-7Z"/><path d="M20 27h24M20 35h17M20 43h10"/><circle cx="49" cy="47" r="7"/><path d="m46 47 2 2 4-5"/></svg>
+        </span>
+      </div>
+      <h2>ZennNyx AI itu apa?</h2>
+      <p>Asisten AI yang dibuat buat ngobrol santai, ngerjain ide, belajar, dan bantu cari informasi tanpa harus buka banyak tab.</p>
+      <div class="welcome-graphic" aria-hidden="true">
+        <svg viewBox="0 0 520 170">
+          <path d="M34 126h452" />
+          <rect x="62" y="44" width="154" height="82" rx="18" />
+          <rect x="304" y="25" width="154" height="101" rx="18" />
+          <path d="M216 85h76" />
+          <path d="m277 78 15 7-15 7" />
+          <circle cx="112" cy="71" r="8" />
+          <circle cx="340" cy="54" r="8" />
+          <circle cx="389" cy="84" r="8" />
+          <path d="M348 54 382 79M345 55 118 71" />
+        </svg>
+      </div>
+    </article>
+
+    <article class="welcome-doc-card">
+      <div class="welcome-card-top">
+        <span class="welcome-card-kicker">02 / BISA NGAPAIN</span>
+        <span class="welcome-card-icon" aria-hidden="true">
+          <svg viewBox="0 0 64 64"><path d="M9 13h46v38H9z"/><path d="m18 23 7 7-7 7M31 37h14"/><path d="M43 13v38"/></svg>
+        </span>
+      </div>
+      <h2>Kerjain dari satu tempat.</h2>
+      <p>Chat biasa, web search dengan sumber, analisis gambar, voice input, dan Think Harder buat pertanyaan yang butuh mikir lebih dalam.</p>
+      <div class="welcome-graphic" aria-hidden="true">
+        <svg viewBox="0 0 520 170">
+          <rect x="45" y="36" width="430" height="98" rx="20"/>
+          <path d="M71 63h98M71 83h68M71 103h128"/>
+          <path d="M261 55h176M261 75h136M261 95h156M261 115h102"/>
+          <circle cx="438" cy="55" r="9"/>
+          <path d="m433 55 4 4 8-10"/>
+        </svg>
+      </div>
+    </article>
+
+    <article class="welcome-doc-card welcome-doc-card-wide">
+      <div class="welcome-card-top">
+        <span class="welcome-card-kicker">03 / GAYA CHAT</span>
+        <span class="welcome-card-icon" aria-hidden="true">
+          <svg viewBox="0 0 64 64"><path d="M12 18h40v28H28l-10 9v-9h-6z"/><path d="M22 29h20M22 36h13"/></svg>
+        </span>
+      </div>
+      <div class="welcome-wide-copy">
+        <div>
+          <h2>Nggak perlu bahasa kantor.</h2>
+          <p>Ngobrol pakai bahasa yang biasa lu pakai. Mau santai, campur Indonesia–English, atau bahas teknis juga oke.</p>
+        </div>
+        <div class="welcome-quote">“Tanya aja. Nanti kita bedah bareng.”</div>
+      </div>
+    </article>
+  </div>
+
+  <div class="suggestions-title">Mulai dari sini</div>
+  <div class="suggestions">
+    <button type="button" data-prompt="Jelasin sesuatu yang menurut lu menarik hari ini.">Jelasin sesuatu</button>
+    <button type="button" data-prompt="Bantu gue bikin sesuatu dari nol.">Bantu bikin sesuatu</button>
+    <button type="button" data-prompt="Cari info terbaru tentang teknologi yang lagi menarik sekarang.">Cari info terbaru</button>
+    <button type="button" data-prompt="Gue punya ide, bantu gue ngembanginnya.">Kembangin ide</button>
+  </div>
+</div>`;
+  return welcome;
+}
+
+function resetToNewChat(){
+  if(busy){
+    showToast('Tunggu sampai ZennNyx selesai merespons.');
+    return
+  }
+  messages=[];
+  clearImage();
+  input.value='';
+  resizeInput();
+  thinkHarder=false;
+  updateThinkMenu();
+  togglePopover(attachPopover,false);
+  toggleAbout(false);
+  document.getElementById('typing')?.remove();
+  document.querySelectorAll('.sources-popover').forEach(el=>el.remove());
+  chat.innerHTML='';
+  chat.appendChild(renderWelcome());
+  bindSuggestions();
+  updateSendState()
+}
 function bindSuggestions(){document.querySelectorAll('[data-prompt]').forEach(btn=>btn.addEventListener('click',()=>{input.value=btn.dataset.prompt;resizeInput();updateSendState();input.focus()}))}
 composer.addEventListener('submit',e=>{e.preventDefault();sendMessage()});
 attachBtn.addEventListener('click',e=>{e.stopPropagation();if(!busy){togglePopover(attachPopover,attachPopover.hidden);toggleAbout(false)}});
@@ -319,4 +456,6 @@ input.addEventListener('paste',e=>{const item=[...(e.clipboardData?.items||[])].
 document.addEventListener('click',e=>{if(!e.target.closest('.attach-popover')&&!e.target.closest('#attachBtn'))togglePopover(attachPopover,false);if(!e.target.closest('.about-popover')&&!e.target.closest('#menuBtn'))toggleAbout(false);if(!e.target.closest('.sources-popover')&&!e.target.closest('[aria-label="Sources"]'))document.querySelectorAll('.sources-popover').forEach(el=>el.remove())});
 menuBtn.addEventListener('click',e=>{e.stopPropagation();togglePopover(attachPopover,false);toggleAbout(aboutPopover.hidden)});
 newChatBtn.addEventListener('click',e=>{e.stopPropagation();resetToNewChat()});
-setupRecognition();bindSuggestions();updateThinkMenu();resizeInput();scheduleGuardUnlock();updateSendState();
+const initialWelcome=document.getElementById('welcome');
+if(initialWelcome)initialWelcome.replaceWith(renderWelcome());
+setupRecognition();bindSuggestions();updateThinkMenu();resizeInput();updateKeyboardInset();scheduleGuardUnlock();updateSendState();
