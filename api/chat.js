@@ -1,11 +1,12 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { getFreeChatModels, isFreeId, isNonChatModel, pickFallbackModels } from "../lib/openrouter.js";
 
 const DAILY_LIMIT = 20;
 const COOLDOWN_MS = 5000;
 const BURST_WINDOW_MS = 60 * 1000;
 const BURST_LIMIT = 3;
 const BURST_COOLDOWN_MS = 10 * 1000;
-const HOUR_MS = 60 * 60 * 1000;
+const TOTAL_BUDGET_MS = 55 * 1000; // vercel.json: maxDuration 60
 
 const GROQ_ALLOWED = new Set([
   "openai/gpt-oss-20b",
@@ -19,6 +20,8 @@ const GEMINI_ALLOWED = new Set([
 
 const burstStore = globalThis.__zennnyxBurstStore || new Map();
 globalThis.__zennnyxBurstStore = burstStore;
+
+/* ───────────── Kuota harian (cookie bertanda tangan) ───────────── */
 
 function jakartaDay(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -58,8 +61,9 @@ function readCookie(req, name) {
 function saveCookie(res, name, value) {
   const existing = res.getHeader("Set-Cookie");
   const next = `${name}=${encodeURIComponent(value)}; Max-Age=604800; Path=/; HttpOnly; SameSite=Lax${process.env.VERCEL_URL ? "; Secure" : ""}`;
-  const list = existing ? (Array.isArray(existing) ? [...existing, next] : [existing, next]) : [next];
-  res.setHeader("Set-Cookie", list);
+  // Ganti cookie bernama sama (mis. saat kuota dikembalikan), jangan ditumpuk.
+  const kept = (existing ? (Array.isArray(existing) ? existing : [existing]) : []).filter(c => !String(c).startsWith(`${name}=`));
+  res.setHeader("Set-Cookie", [...kept, next]);
 }
 
 function emptyQuota(day = jakartaDay()) {
@@ -129,6 +133,7 @@ function takeDailyQuota(req, res) {
     return { ok: false, status: 429, error: "Tunggu sebentar sebelum mengirim pesan berikutnya.", quota: summary };
   }
 
+  const before = JSON.parse(JSON.stringify(quota)); // untuk dikembalikan kalau provider gagal
   quota.burst = quota.burst.filter(t => now - t < BURST_WINDOW_MS);
   quota.count += 1;
   quota.lastAt = now;
@@ -138,8 +143,16 @@ function takeDailyQuota(req, res) {
     quota.burst = [];
   }
   writeQuota(res, quota);
-  return { ok: true, quota: quotaSummary(quota) };
+  return { ok: true, quota: quotaSummary(quota), before };
 }
+
+// Pesan yang gagal karena provider (bukan salah user) tidak boleh menghabiskan jatah 20/hari.
+function refundQuota(res, before) {
+  writeQuota(res, before);
+  return quotaSummary(before);
+}
+
+/* ───────────── Web search (Tavily) ───────────── */
 
 function currentDateJakarta() {
   return new Intl.DateTimeFormat("id-ID", {
@@ -151,30 +164,50 @@ function currentDateJakarta() {
   }).format(new Date());
 }
 
-function extractCurrentUserText(messages) {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m?.role !== "user") continue;
-    if (typeof m.content === "string") return m.content.replace(/\s+/g, " ").trim().slice(0, 1600);
-    if (Array.isArray(m.content)) {
-      const text = m.content.find(p => p?.type === "text" && typeof p.text === "string")?.text;
-      if (text) return text.replace(/\s+/g, " ").trim().slice(0, 1600);
-    }
-    break;
+function userText(message) {
+  if (!message || message.role !== "user") return "";
+  if (typeof message.content === "string") return message.content.replace(/\s+/g, " ").trim();
+  if (Array.isArray(message.content)) {
+    const text = message.content.find(p => p?.type === "text" && typeof p.text === "string")?.text;
+    return text ? text.replace(/\s+/g, " ").trim() : "";
   }
   return "";
 }
 
-function shouldSearchWeb(query) {
+function extractCurrentUserText(messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === "user") return userText(messages[i]).slice(0, 1600);
+  }
+  return "";
+}
+
+// Pertanyaan lanjutan pendek ("dan harganya?") butuh konteks pertanyaan sebelumnya supaya hasil pencarian relevan.
+function buildSearchQuery(messages) {
+  const users = messages.filter(m => m?.role === "user");
+  const current = userText(users[users.length - 1]);
+  const previous = userText(users[users.length - 2]);
+  const query = current.length < 32 && previous ? `${previous.slice(0, 140)} ${current}` : current;
+  return query.slice(0, 380);
+}
+
+const EXPLICIT_SEARCH = /\b(cari(?:kan|in|\s?tau|\s?tahu)?|search|googling|google|browsing|telusuri|cek (?:di )?(?:web|internet|google)|(?:di|dari|lewat) (?:internet|web|google)|web search|kasih (?:sumber|link|referensi)|sertakan (?:sumber|link|referensi)|pakai sumber)\b/i;
+const CHITCHAT = /^(hai|halo|hallo|hello|hi|hey|ok|oke|okay|sip|mantap|thanks|thank you|makasih|terima kasih|wkwk\w*|haha\w*|lol|yo|test|tes|lanjut|lanjutkan|siapa kamu|kamu siapa|who are you|what are you)\b[!.,? ]*$/i;
+const OFFLINE_TASK = /\b(bikin|buatkan|buatin|buat|tuliskan|tulis|rewrite|parafrase|ringkas|rangkum|terjemahkan|translate|debug|perbaiki|fix|refactor|optimasi|javascript|typescript|html|css|python|kode|code|script|regex|sql|website|landing page|puisi|cerita|caption|hitung|selesaikan|kerjakan|integral|turunan|persamaan|rumus|solve|simplify|factor|ubah|convert)\b/i;
+const FRESH_SIGNAL = /\b(sekarang|saat ini|hari ini|kemarin|besok|terbaru|terkini|latest|today|yesterday|tomorrow|current|2025|2026|2027|update|berita|news|jadwal|schedule|score|skor|ranking|peringkat|harga|price|biaya|tarif|promo|diskon|stok|stock|rilis|release|cuaca|weather|kurs|nilai tukar)\b/i;
+const CURRENT_INTENT = /\b(beli|buy|terbaik|best|rekomendasi|recommended|spesifikasi|spec|versi terbaru|official|resmi|lokasi|alamat|buka sekarang|hp|smartphone|iphone|samsung|xiaomi|redmi|poco|oppo|vivo|realme|tecno|infinix|laptop|tablet|film|game|produk|presiden|menteri|gubernur|ceo|juara|pemenang|skor)\b/i;
+const QUESTION = /\b(apa itu|apa arti|apakah|apa|siapa|kapan|di ?mana|dimana|berapa|mengapa|kenapa|bagaimana|gimana|jelaskan|jelasin|what|who|when|where|why|which|how)\b/i;
+
+// mode: "auto" (default) | "on" (selalu cari) | "off"
+function shouldSearchWeb(query, { mode = "auto", hasImage = false } = {}) {
   const q = String(query || "").toLowerCase().trim();
-  if (!q) return false;
-  if (/^(hai|halo|hello|hi|hey|ok|oke|thanks|makasih|terima kasih|wkwk|lol|yo|test|tes|siapa kamu|who are you|what are you)\b[!.? ]*$/i.test(q)) return false;
-  const currentIntent = /\b(sekarang|saat ini|hari ini|kemarin|besok|terbaru|terkini|latest|today|yesterday|tomorrow|current|2026|update|berita|news|jadwal|schedule|score|skor|ranking|peringkat|harga|price|biaya|tarif|promo|diskon|beli|buy|terbaik|best|rekomendasi|recommended|spesifikasi|spec|stok|stock|rilis|release|versi terbaru|official|resmi|cuaca|weather|kurs|exchange|nilai tukar|lokasi|alamat|buka sekarang|hp|smartphone|iphone|samsung|xiaomi|redmi|poco|oppo|vivo|realme|tecno|infinix|laptop|tablet|film|game|produk)\b/i.test(q);
-  if (currentIntent) return true;
-  if (/\b(bikin|buatkan|buat|tuliskan|rewrite|parafrase|terjemahkan|translate|debug|javascript|typescript|html|css|python|kode|code|regex|website|landing page)\b/i.test(q)) return false;
-  if (/^\s*(berapa|hitung|calculate|what is)\s+[0-9\s+\-*/().=]+[?!.]*\s*$/i.test(q)) return false;
-  if (/\b(apa itu|apa arti|siapa|kapan|di mana|dimana|berapa|mengapa|kenapa|how|what|who|when|where|why|which)\b/i.test(q)) return true;
-  return false;
+  if (!q || mode === "off") return false;
+  if (CHITCHAT.test(q)) return false;
+  if (mode === "on") return true;
+  if (EXPLICIT_SEARCH.test(q)) return true;
+  if (hasImage) return false;
+  if (OFFLINE_TASK.test(q)) return FRESH_SIGNAL.test(q);
+  if (FRESH_SIGNAL.test(q) || CURRENT_INTENT.test(q)) return true;
+  return QUESTION.test(q);
 }
 
 function isIndonesianQuery(query) {
@@ -186,24 +219,46 @@ function makeSearchConfig(query) {
   const config = { query: String(query).slice(0, 380), search_depth: "basic", max_results: 5, include_answer: false, include_raw_content: false };
   config.topic = isNews ? "news" : "general";
   if (isNews) config.time_range = "week";
-  if (isIndonesianQuery(query)) config.country = "Indonesia";
+  if (!isNews && isIndonesianQuery(query)) config.country = "indonesia"; // Tavily menerima nama negara huruf kecil
   return config;
 }
 
-async function searchWeb(query) {
+function describeTavilyError(status, data) {
+  const detail = String(data?.detail?.error || data?.detail || data?.error || "").replace(/\s+/g, " ").slice(0, 160);
+  let msg;
+  if (status === 401 || status === 403) msg = "API key Tavily ditolak (salah, dicabut, atau tidak punya akses)";
+  else if (status === 429) msg = "terlalu banyak permintaan ke Tavily, coba lagi sebentar";
+  else if (status === 432 || status === 433) msg = "kuota/limit paket Tavily habis";
+  else if (status === 400) msg = "Tavily menolak format permintaan";
+  else if (status >= 500) msg = "server Tavily sedang bermasalah";
+  else msg = `Tavily membalas status ${status}`;
+  return `${msg} (HTTP ${status})${detail ? `: ${detail}` : ""}`;
+}
+
+async function searchWeb(query, timeoutMs = 7000) {
   const key = process.env.TAVILY_API_KEY;
-  if (!key) return { used: false, sources: [] };
-  try {
+  if (!key) return { used: false, sources: [], error: "TAVILY_API_KEY belum dipasang di Vercel." };
+  const attempt = async config => {
     const response = await fetch("https://api.tavily.com/search", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify(makeSearchConfig(query)),
-      signal: AbortSignal.timeout(8000)
+      body: JSON.stringify(config),
+      signal: AbortSignal.timeout(timeoutMs)
     });
     const data = await response.json().catch(() => ({}));
+    return { response, data };
+  };
+  try {
+    const config = makeSearchConfig(query);
+    let { response, data } = await attempt(config);
+    if (response.status === 400 && (config.country || config.time_range || config.topic !== "general")) {
+      // Parameter opsional ditolak? Ulangi dengan kueri polos supaya pencarian tetap jalan.
+      ({ response, data } = await attempt({ query: config.query, search_depth: "basic", max_results: 5 }));
+    }
     if (!response.ok) {
-      console.error("Tavily search error:", response.status, data?.detail || data?.error || "unknown");
-      return { used: false, sources: [] };
+      const error = describeTavilyError(response.status, data);
+      console.error("Tavily search error:", error);
+      return { used: false, sources: [], error };
     }
     const sources = (Array.isArray(data.results) ? data.results : []).filter(r => r && typeof r.url === "string" && /^https?:\/\//i.test(r.url)).slice(0, 5).map(r => ({
       title: String(r.title || r.url).slice(0, 180),
@@ -211,10 +266,12 @@ async function searchWeb(query) {
       domain: (() => { try { return new URL(r.url).hostname.replace(/^www\./, ""); } catch { return ""; } })(),
       snippet: String(r.content || "").replace(/\s+/g, " ").slice(0, 450)
     }));
-    return { used: sources.length > 0, sources };
+    if (!sources.length) return { used: false, sources: [], error: "Pencarian web tidak menemukan hasil untuk kueri ini." };
+    return { used: true, sources };
   } catch (error) {
+    const timeout = error?.name === "TimeoutError" || error?.name === "AbortError";
     console.error("Tavily search failed:", error);
-    return { used: false, sources: [] };
+    return { used: false, sources: [], error: timeout ? "Pencarian web melebihi batas waktu." : "Tidak bisa tersambung ke Tavily." };
   }
 }
 
@@ -222,15 +279,29 @@ function formatSearchContext(sources) {
   return sources.map((s, i) => `[${i + 1}] ${s.title}\nURL: ${s.url}\nSnippet: ${s.snippet}`).join("\n\n");
 }
 
+/* ───────────── Prompt ───────────── */
+
 function systemPrompt({ thinkHarder, currentDate, webSources, wantsWeb, wantsCode }) {
-  const tone = `Kamu adalah ZennNyx AI, asisten personal yang cerdas dan enak diajak ngobrol. Balas dengan bahasa yang dipakai user. Kalau user ngobrol dalam bahasa Indonesia, pakai bahasa Indonesia sehari-hari yang natural dan santai, lebih mirip teman ngobrol daripada customer service. Ikuti gaya "gue/lu" jika user memakai gaya itu; hindari "saya/Anda" dan bahasa kantor yang kaku kecuali user minta formal. Jangan memaksakan slang di setiap kalimat. Jaga jawaban tetap jelas, jujur, dan berguna. Tanggal saat ini di WIB: ${currentDate}. Gunakan Markdown dengan benar. Untuk matematika, tulis rumus memakai LaTeX dengan delimiter: inline gunakan \\( ... \\), rumus blok gunakan \\[ ... \\]. Jangan menulis perintah seperti \\times sebagai teks polos di luar delimiter. Jangan mengarang sumber atau mengaku melakukan pencarian jika tidak ada hasil web saat ini. Jangan membuka chain-of-thought privat; berikan jawaban dan alasan ringkas yang berguna.`;
-  const coding = wantsCode ? `\n\nMODE PEMBUATAN KODE: User mungkin meminta aplikasi atau website. Berikan kode yang lengkap dan benar-benar bisa dijalankan, bukan pseudo-code. Untuk project web, sertakan satu blok \`\`\`html lengkap yang bisa dijalankan mandiri; jika diminta terpisah, sertakan juga blok \`\`\`css dan \`\`\`javascript. Pastikan fitur yang disebutkan di prompt benar-benar dibuat, responsive untuk mobile/desktop, dan jangan menulis placeholder untuk bagian inti. Setelah kode, jelaskan file dan cara menjalankannya secara singkat.` : "";
+  const tone = `Kamu adalah ZennNyx AI, asisten personal yang cerdas dan enak diajak ngobrol. Balas dengan bahasa yang dipakai user. Kalau user ngobrol dalam bahasa Indonesia, pakai bahasa Indonesia sehari-hari yang natural dan santai, lebih mirip teman ngobrol daripada customer service. Ikuti gaya "gue/lu" jika user memakai gaya itu; hindari "saya/Anda" dan bahasa kantor yang kaku kecuali user minta formal. Jangan memaksakan slang di setiap kalimat. Jaga jawaban tetap jelas, jujur, dan berguna. Tanggal saat ini di WIB: ${currentDate}. Gunakan Markdown dengan benar.
+
+MATEMATIKA: tulis rumus dengan LaTeX. Inline: \\( ... \\). Rumus blok: \\[ ... \\]. Beberapa langkah yang sejajar ditaruh dalam SATU blok: \\[ \\begin{aligned} x_1 &= ... \\\\ x_2 &= ... \\end{aligned} \\]. Jangan pernah menaruh format Markdown (** _ \`) di dalam rumus; pakai x_1 atau x_{1} untuk subskrip. Jangan pakai tanda $ untuk rumus (bentrok dengan tanda uang). Jangan menulis perintah LaTeX seperti \\times atau \\frac sebagai teks polos di luar delimiter.
+
+Jangan mengarang sumber atau mengaku melakukan pencarian jika tidak ada hasil web saat ini. Jangan membuka chain-of-thought privat; berikan jawaban dan alasan ringkas yang berguna.`;
+  const coding = wantsCode ? `\n\nMODE PEMBUATAN KODE: User mungkin meminta aplikasi atau website. Berikan kode yang lengkap dan benar-benar bisa dijalankan, bukan pseudo-code. Untuk website, utamakan SATU blok \`\`\`html berisi file HTML mandiri (CSS di <style>, JavaScript di <script>) karena hasilnya langsung ditampilkan sebagai pratinjau layar penuh. Jangan memecah jadi banyak file kecuali user memintanya. Kode HARUS lengkap sampai </html> dan tidak boleh terpotong: kalau fiturnya banyak, tulis ringkas dan efisien supaya muat. Wajib responsive (mobile dulu) dengan <meta name="viewport">, tidak bergantung pada file lokal; CDN publik boleh bila perlu. Jangan menulis placeholder untuk bagian inti. Jika user hanya bertanya atau ngobrol (bukan meminta perubahan kode), jawab biasa tanpa menulis ulang seluruh kode. Penjelasan setelah kode cukup singkat.` : "";
   const thinking = thinkHarder ? `\n\nMODE THINK HARDER: Analisis kebutuhan dengan cermat dan jawab lebih mendalam serta terstruktur, tetapi tetap gunakan gaya bahasa santai yang sesuai user. Jangan bertele-tele tanpa manfaat.` : "";
   const web = webSources.length
     ? `\n\nPENCARIAN WEB UNTUK PERTANYAAN TERAKHIR INI:\nGunakan sumber di bawah sebagai bukti untuk klaim faktual/aktual. Sumber ini hanya milik pertanyaan TERAKHIR, bukan seluruh percakapan. Jangan gunakan kembali sumber lama sebagai sumber pertanyaan baru. Beri penanda [1], [2], dst hanya untuk sumber yang tersedia di bawah. Bila tidak mendukung sebuah klaim, akui belum terverifikasi.\n\n${formatSearchContext(webSources)}`
     : wantsWeb ? "\n\nUser membutuhkan fakta yang mungkin aktual, tetapi pencarian web tidak menghasilkan sumber. Jangan berpura-pura sudah mencari; jelaskan keterbatasan/ketidakpastian." : "";
   return tone + coding + thinking + web;
 }
+
+function modelIdentity(model) {
+  const rawModelId = String(model || "model AI").replace(/:free$/, "");
+  const shortModelName = rawModelId.split("/").pop().replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  return `\n\nIDENTITAS MODEL AKTIF: ${shortModelName} (ID model: ${rawModelId}). ZennNyx AI adalah nama aplikasi/asisten, bukan klaim bahwa model dasarnya dikembangkan oleh ZennNyx. Jika user bertanya model apa yang dipakai, jawab jujur dengan menyebut model aktif tersebut. Jangan mengarang identitas atau mengaku sebagai model buatan ZennNyx.`;
+}
+
+/* ───────────── Util pesan ───────────── */
 
 function normalizeMessages(incoming) {
   return (Array.isArray(incoming) ? incoming : []).filter(m => m && (m.role === "user" || m.role === "assistant")).slice(-18).map(m => {
@@ -264,6 +335,14 @@ function textFromOpenAIResponse(data) {
   return "";
 }
 
+// Beberapa model menyelipkan proses berpikir di dalam <think>…</think>; itu tidak untuk ditampilkan.
+function stripThinking(text) {
+  return String(text || "")
+    .replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi, "")
+    .replace(/^\s*<(think|thinking|reasoning)>[\s\S]*$/i, "")
+    .trim();
+}
+
 function isBase64Image(url) {
   const match = String(url || "").match(/^data:(image\/(?:jpeg|jpg|png|webp|gif));base64,([\s\S]+)$/i);
   return match ? { mimeType: match[1].toLowerCase(), data: match[2] } : null;
@@ -288,79 +367,228 @@ function toGeminiContents(messages) {
   }).filter(m => m.parts.length > 0);
 }
 
-async function callGroq(model, messages, prompt, thinkHarder) {
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: "system", content: prompt }, ...messages],
-      max_completion_tokens: thinkHarder ? 4096 : 4096,
-      temperature: thinkHarder ? 0.55 : 0.7
-    }),
-    signal: AbortSignal.timeout(25000)
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    console.error("Groq error:", response.status, data?.error?.message || "unknown");
-    const error = new Error("Model Groq gagal memproses permintaan. Coba model lain atau periksa limit API.");
-    error.status = response.status === 429 ? 429 : 502;
-    throw error;
+// Model yang menolak role "system"/"developer" (mis. Gemma): sisipkan instruksi ke pesan user pertama.
+function foldSystemIntoUser(messages, prompt) {
+  const header = `[INSTRUKSI SISTEM]\n${prompt}\n[AKHIR INSTRUKSI]\n\n`;
+  const copy = messages.map(m => ({ ...m }));
+  const idx = copy.findIndex(m => m.role === "user");
+  if (idx === -1) return [{ role: "user", content: header }, ...copy];
+  const target = copy[idx];
+  if (typeof target.content === "string") target.content = header + target.content;
+  else if (Array.isArray(target.content)) {
+    const parts = target.content.map(p => ({ ...p }));
+    const t = parts.find(p => p.type === "text");
+    if (t) t.text = header + t.text; else parts.unshift({ type: "text", text: header });
+    target.content = parts;
   }
-  return textFromOpenAIResponse(data);
+  return copy;
 }
 
-async function callGemini(model, messages, prompt, thinkHarder) {
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+/* ───────────── Error provider ───────────── */
+
+class UpstreamError extends Error {
+  constructor(message, { status = 502, upstreamStatus = 0, detail = "", fatal = false, globalLimit = false } = {}) {
+    super(message);
+    this.name = "UpstreamError";
+    this.status = status;
+    this.upstreamStatus = upstreamStatus;
+    this.detail = detail;
+    this.fatal = fatal;           // percuma coba model lain (API key salah, kuota harian habis, dst.)
+    this.globalLimit = globalLimit;
+  }
+}
+
+function cleanDetail(text) {
+  return String(text || "").replace(/\s+/g, " ").replace(/([?&](?:key|api_key|token)=)[^&\s]+/gi, "$1***").slice(0, 220);
+}
+
+function upstreamMessage(data) {
+  const e = data?.error;
+  const parts = [];
+  if (typeof e === "string") parts.push(e);
+  if (typeof e?.message === "string") parts.push(e.message);
+  const raw = e?.metadata?.raw;
+  if (typeof raw === "string") parts.push(raw);
+  else if (typeof raw?.error?.message === "string") parts.push(raw.error.message);
+  if (typeof data?.message === "string") parts.push(data.message);
+  return cleanDetail([...new Set(parts.filter(Boolean))].join(" — "));
+}
+
+function upstreamFail(label, status, data) {
+  const detail = upstreamMessage(data);
+  let message, httpStatus = 502, fatal = false, globalLimit = false;
+  if (status === 401 || status === 403) { message = `${label}: API key ditolak atau tidak punya akses ke model ini.`; fatal = true; }
+  else if (status === 402) { message = `${label}: kredit/saldo tidak cukup untuk model ini.`; fatal = true; }
+  else if (status === 404) message = `${label}: model tidak ditemukan atau sedang tidak punya endpoint aktif.`;
+  else if (status === 408 || status === 504) { message = `${label}: respons terlalu lama.`; httpStatus = 504; }
+  else if (status === 429) {
+    httpStatus = 429;
+    if (label === "OpenRouter" && /free-models-per-day/i.test(detail)) {
+      message = "OpenRouter: kuota harian SEMUA model gratis habis (batas akun tanpa top-up). Reset sekitar 07:00 WIB; top up kredit ≥ $10 di OpenRouter untuk jatah 1000 pesan/hari, atau pakai model Groq/Gemini dulu.";
+      fatal = true; globalLimit = true;
+    } else if (label === "OpenRouter" && /free-models-per-min/i.test(detail)) {
+      message = "OpenRouter: terlalu banyak permintaan ke model gratis dalam 1 menit. Tunggu sekitar semenit lalu kirim ulang.";
+      globalLimit = true;
+    } else if (/per[- ]day|\bRPD\b|\bTPD\b|daily/i.test(detail)) message = `${label}: kuota harian model ini sudah habis. Coba model lain atau tunggu reset.`;
+    else message = `${label}: limit pemakaian model ini tercapai. Coba lagi sebentar atau ganti model.`;
+  }
+  else if (status >= 500) message = `${label}: server provider sedang bermasalah.`;
+  else message = `${label}: permintaan ditolak (HTTP ${status}).`;
+  if (detail && !fatal) message += ` (${detail})`;
+  return new UpstreamError(message, { status: httpStatus, upstreamStatus: status, detail, fatal, globalLimit });
+}
+
+async function postJson(label, url, headers, body, timeoutMs) {
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+  } catch (error) {
+    const timeout = error?.name === "TimeoutError" || error?.name === "AbortError";
+    throw new UpstreamError(
+      timeout ? `${label}: respons terlalu lama (lebih dari ${Math.round(timeoutMs / 1000)} detik).` : `${label}: gagal tersambung ke server provider.`,
+      { status: timeout ? 504 : 502 }
+    );
+  }
+  const data = await response.json().catch(() => ({}));
+  return { response, data };
+}
+
+function makeDeadline(startedAt, total = TOTAL_BUDGET_MS) {
+  return {
+    left: () => total - (Date.now() - startedAt),
+    timeout(cap) {
+      const left = total - (Date.now() - startedAt) - 1200;
+      if (left < 3000) throw new UpstreamError("Waktu proses habis sebelum model sempat menjawab. Coba lagi atau pilih model yang lebih cepat.", { status: 504 });
+      return Math.min(cap, left);
+    }
+  };
+}
+
+/* ───────────── Provider ───────────── */
+
+const tokenBudget = {
+  groq: o => (o.wantsCode ? 8192 : o.thinkHarder ? 6144 : 4096),
+  gemini: o => (o.wantsCode ? 16384 : o.thinkHarder ? 8192 : 4096),
+  openrouter: o => (o.wantsCode ? 6144 : o.thinkHarder ? 5000 : 4096)
+};
+
+async function callGroq(model, messages, prompt, opts, deadline) {
+  const { response, data } = await postJson("Groq", "https://api.groq.com/openai/v1/chat/completions",
+    { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+    {
+      model,
+      messages: [{ role: "system", content: prompt }, ...messages],
+      max_completion_tokens: tokenBudget.groq(opts),
+      temperature: opts.thinkHarder ? 0.55 : 0.7
+    },
+    deadline.timeout(opts.wantsCode ? 45000 : 28000));
+  if (!response.ok) { console.error("Groq error:", response.status, upstreamMessage(data)); throw upstreamFail("Groq", response.status, data); }
+  const reply = stripThinking(textFromOpenAIResponse(data));
+  if (!reply) throw new UpstreamError("Groq: model mengembalikan jawaban kosong. Coba kirim ulang.", { status: 502 });
+  return reply;
+}
+
+async function callGemini(model, messages, prompt, opts, deadline) {
+  const { response, data } = await postJson("Gemini",
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
+    {},
+    {
       systemInstruction: { parts: [{ text: prompt }] },
       contents: toGeminiContents(messages),
-      generationConfig: { maxOutputTokens: thinkHarder ? 8192 : 4096 }
-    }),
-    signal: AbortSignal.timeout(25000)
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    console.error("Gemini error:", response.status, data?.error?.message || "unknown");
-    const error = new Error("Model Gemini gagal memproses permintaan. Cek API key, akses model, atau coba model lain.");
-    error.status = response.status === 429 ? 429 : 502;
-    throw error;
+      generationConfig: { maxOutputTokens: tokenBudget.gemini(opts) }
+    },
+    deadline.timeout(opts.wantsCode ? 50000 : 28000));
+  if (!response.ok) { console.error("Gemini error:", response.status, upstreamMessage(data)); throw upstreamFail("Gemini", response.status, data); }
+  if (data?.promptFeedback?.blockReason) {
+    throw new UpstreamError(`Gemini menolak pesan ini (${data.promptFeedback.blockReason}). Coba ubah kalimatnya.`, { status: 502, fatal: true });
   }
-  const reply = (data?.candidates?.[0]?.content?.parts || []).map(p => typeof p.text === "string" ? p.text : "").join("");
-  if (!reply) throw Object.assign(new Error("Gemini mengembalikan jawaban kosong."), { status: 502 });
+  const reply = stripThinking((data?.candidates?.[0]?.content?.parts || []).map(p => typeof p.text === "string" ? p.text : "").join(""));
+  if (!reply) {
+    const why = data?.candidates?.[0]?.finishReason;
+    throw new UpstreamError(`Gemini mengembalikan jawaban kosong${why ? ` (${why})` : ""}. Coba kirim ulang.`, { status: 502 });
+  }
   return reply;
 }
 
-async function callOpenRouter(model, messages, prompt, thinkHarder) {
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-      "Content-Type": "application/json",
-      "X-Title": "ZennNyx AI",
-      ...(process.env.PUBLIC_APP_URL ? { "HTTP-Referer": process.env.PUBLIC_APP_URL } : {})
-    },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: "system", content: prompt }, ...messages],
-      max_tokens: thinkHarder ? 4096 : 4096,
-      temperature: thinkHarder ? 0.55 : 0.7
-    }),
-    signal: AbortSignal.timeout(25000)
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    console.error("OpenRouter error:", response.status, data?.error?.message || "unknown");
-    const error = new Error("Model OpenRouter gagal memproses permintaan. Bisa jadi model sedang offline atau kuota provider habis.");
-    error.status = response.status === 429 ? 429 : 502;
-    throw error;
+async function callOpenRouterOnce(model, messages, promptFor, opts, variant, deadline) {
+  const prompt = promptFor(model);
+  const body = {
+    model,
+    messages: variant.fold ? foldSystemIntoUser(messages, prompt) : [{ role: "system", content: prompt }, ...messages],
+    max_tokens: variant.maxTokens,
+    temperature: opts.thinkHarder ? 0.55 : 0.7
+  };
+  if (variant.reasoning) body.reasoning = { effort: opts.thinkHarder ? "medium" : "low", exclude: true };
+  const { response, data } = await postJson("OpenRouter", "https://openrouter.ai/api/v1/chat/completions", {
+    Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+    "X-Title": "ZennNyx AI",
+    ...(process.env.PUBLIC_APP_URL ? { "HTTP-Referer": process.env.PUBLIC_APP_URL } : {})
+  }, body, deadline.timeout(opts.wantsCode ? 45000 : 28000));
+
+  // OpenRouter sering membalas HTTP 200 dengan isi {error:{…}} saat provider upstream gagal.
+  const embeddedError = data?.error || data?.choices?.[0]?.error;
+  if (!response.ok || embeddedError) {
+    const status = response.ok ? Number(embeddedError?.code) || 502 : response.status;
+    const errorBody = { error: embeddedError || data?.error };
+    console.error("OpenRouter error:", model, status, upstreamMessage(errorBody));
+    throw upstreamFail("OpenRouter", status, errorBody);
   }
-  const reply = textFromOpenAIResponse(data);
-  if (!reply) throw Object.assign(new Error("OpenRouter mengembalikan jawaban kosong."), { status: 502 });
+  const choice = data?.choices?.[0];
+  const reply = stripThinking(textFromOpenAIResponse(data));
+  if (!reply) {
+    const why = choice?.finish_reason === "length" ? " (token habis dipakai untuk berpikir)" : "";
+    throw new UpstreamError(`OpenRouter: model ${model.split("/").pop().replace(/:free$/, "")} mengembalikan jawaban kosong${why}.`, { status: 502 });
+  }
   return reply;
 }
+
+async function callOpenRouterModel(model, messages, promptFor, opts, deadline) {
+  let variant = { fold: /gemma/i.test(model), reasoning: true, maxTokens: tokenBudget.openrouter(opts) };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await callOpenRouterOnce(model, messages, promptFor, opts, variant, deadline);
+    } catch (error) {
+      if (!(error instanceof UpstreamError) || error.upstreamStatus !== 400 || attempt === 2) throw error;
+      const detail = error.detail || "";
+      if (!variant.fold && /developer instruction|system (instruction|prompt|message|role)|instruction is not enabled|role/i.test(detail)) {
+        variant = { ...variant, fold: true };
+      } else if (variant.reasoning || variant.maxTokens > 4096) {
+        variant = { ...variant, reasoning: false, maxTokens: Math.min(variant.maxTokens, 4096) };
+      } else throw error;
+    }
+  }
+  throw new UpstreamError("OpenRouter: gagal memproses permintaan.", { status: 502 });
+}
+
+// Model gratis sering penuh/offline. Kalau gagal, coba otomatis sampai 2 model gratis lain.
+async function callOpenRouterWithFallback(choiceModel, messages, promptFor, opts, deadline, hasImage) {
+  const tried = [];
+  let model = choiceModel, firstError = null;
+  for (let n = 0; n < 3; n++) {
+    try {
+      const reply = await callOpenRouterModel(model, messages, promptFor, opts, deadline);
+      return { reply, model, fallbackFrom: n > 0 ? choiceModel : undefined };
+    } catch (error) {
+      if (!(error instanceof UpstreamError)) throw error;
+      if (!firstError) firstError = error;
+      tried.push(model);
+      // Masalah yang berlaku untuk SEMUA model (key salah, kuota harian habis, waktu habis): jangan lanjut mencoba.
+      if (error.fatal || error.globalLimit || deadline.left() < 9000) throw error;
+      const next = (await pickFallbackModels(tried, { needVision: hasImage, limit: 1 }))[0];
+      if (!next) throw firstError;
+      model = next;
+    }
+  }
+  firstError.message += ` Cadangan otomatis (${tried.length - 1} model gratis lain) juga gagal.`;
+  throw firstError;
+}
+
+/* ───────────── Handler ───────────── */
 
 export default async function handler(req, res) {
   if (req.method !== "POST" && req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
@@ -380,6 +608,7 @@ export default async function handler(req, res) {
     });
   }
 
+  const startedAt = Date.now();
   const body = req.body || {};
   const messages = normalizeMessages(body.messages);
   const last = messages[messages.length - 1];
@@ -399,46 +628,60 @@ export default async function handler(req, res) {
     if (!GEMINI_ALLOWED.has(chosenModel)) return res.status(400).json({ error: "Model Gemini tidak diizinkan." });
   } else if (choice.provider === "openrouter") {
     if (!process.env.OPENROUTER_API_KEY) return res.status(503).json({ error: "Tambahkan OPENROUTER_API_KEY di Vercel untuk memakai OpenRouter." });
-    if (!/^[a-zA-Z0-9._/-]{2,140}:free$/.test(chosenModel)) return res.status(400).json({ error: "Untuk menjaga biaya tetap aman, ZennNyx hanya mengizinkan model OpenRouter bertanda free." });
+    if (!isFreeId(chosenModel)) return res.status(400).json({ error: "Untuk menjaga biaya tetap aman, ZennNyx hanya mengizinkan model OpenRouter bertanda free." });
+    if (isNonChatModel(chosenModel)) return res.status(400).json({ error: "Model ini bukan model chat (khusus moderasi/embedding). Pilih model lain." });
+    if (hasImage) {
+      const info = (await getFreeChatModels()).find(m => m.id === chosenModel);
+      if (info && !info.vision) return res.status(400).json({ error: "Model ini tidak bisa membaca gambar. Pilih model yang bertanda \"Bisa menerima gambar\"." });
+    }
   } else {
     return res.status(400).json({ error: "Provider model tidak dikenal." });
   }
 
-  // Consume quota before external searches/provider requests, so over-limit calls never use API credits.
+  // Jatah dipotong sebelum search/provider dipanggil, supaya request over-limit tidak memakai kredit API.
   const quotaResult = takeDailyQuota(req, res);
-  if (!quotaResult.ok) return res.status(quotaResult.status).json({ error: quotaResult.error, quota: quotaResult.quota });
+  if (!quotaResult.ok) return res.status(quotaResult.status).json({ error: quotaResult.error, quota: quotaResult.quota, rejected: true });
 
-  const userQuery = extractCurrentUserText(messages);
-  const wantsWeb = shouldSearchWeb(userQuery);
-  const wantsCode = /\b(buat|bikin|buatkan|build|create|website|web app|landing page|html|css|javascript|react|komponen|preview|aplikasi)\b/i.test(userQuery);
-  const currentDate = currentDateJakarta();
-  const webResult = wantsWeb ? await searchWeb(userQuery) : { used: false, sources: [] };
-  const rawModelId=String(chosenModel||"model AI").replace(/:free$/,"");
-  const shortModelName=rawModelId.split("/").pop().replace(/[-_]/g," ").replace(/\b\w/g,c=>c.toUpperCase());
-  const modelIdentity=`${shortModelName} (ID model: ${rawModelId})`;
-  const prompt = `${systemPrompt({ thinkHarder: body.thinkHarder === true, currentDate, webSources: webResult.sources, wantsWeb, wantsCode })}\n\nIDENTITAS MODEL AKTIF: ${modelIdentity}. ZennNyx AI adalah nama aplikasi/asisten, bukan klaim bahwa model dasarnya dikembangkan oleh ZennNyx. Jika user bertanya model apa yang dipakai, jawab jujur dengan menyebut model aktif tersebut. Jangan mengarang identitas atau mengaku sebagai model buatan ZennNyx.`;
   const thinkHarder = body.thinkHarder === true;
+  const searchMode = ["on", "off"].includes(body.webSearch) ? body.webSearch : "auto";
+  const userQuery = extractCurrentUserText(messages);
+  const prevHadWebsite = messages.some(m => m.role === "assistant" && typeof m.content === "string" && /```\s*html/i.test(m.content));
+  const wantsCode = prevHadWebsite || /\b(buat|bikin|buatkan|buatin|build|create|website|web app|landing page|html|css|javascript|react|komponen|preview|pratinjau|aplikasi)\b/i.test(userQuery);
+  const opts = { thinkHarder, wantsCode };
+  const wantsWeb = shouldSearchWeb(userQuery, { mode: searchMode, hasImage });
 
   try {
-    let reply = "";
-    if (choice.provider === "groq") reply = await callGroq(chosenModel, messages, prompt, thinkHarder);
-    else if (choice.provider === "gemini") reply = await callGemini(chosenModel, messages, prompt, thinkHarder);
-    else reply = await callOpenRouter(chosenModel, messages, prompt, thinkHarder);
+    const currentDate = currentDateJakarta();
+    const webResult = wantsWeb ? await searchWeb(buildSearchQuery(messages)) : { used: false, sources: [] };
+    const promptFor = model => systemPrompt({ thinkHarder, currentDate, webSources: webResult.sources, wantsWeb, wantsCode }) + modelIdentity(model);
+    const deadline = makeDeadline(startedAt);
 
-    const finalReply = String(reply).trim();
+    let reply = "", usedModel = chosenModel, fallbackFrom;
+    if (choice.provider === "groq") reply = await callGroq(chosenModel, messages, promptFor(chosenModel), opts, deadline);
+    else if (choice.provider === "gemini") reply = await callGemini(chosenModel, messages, promptFor(chosenModel), opts, deadline);
+    else ({ reply, model: usedModel, fallbackFrom } = await callOpenRouterWithFallback(chosenModel, messages, promptFor, opts, deadline, hasImage));
+
     return res.status(200).json({
-      reply: finalReply,
+      reply: String(reply).trim(),
       provider: choice.provider,
-      model: chosenModel,
+      model: usedModel,
+      fallbackFrom,
       thinkHarder,
       hasImage,
       sources: webResult.sources,
       webSearched: webResult.used,
+      searchError: wantsWeb && !webResult.used ? webResult.error || "Pencarian web tidak menghasilkan sumber." : undefined,
       quota: quotaResult.quota,
       projectHint: wantsCode
     });
   } catch (error) {
-    const status = Number(error?.status) || 502;
-    return res.status(status).json({ error: error?.message || "Ada kendala saat menghubungi model AI.", quota: quotaResult.quota });
+    const known = error instanceof UpstreamError;
+    if (!known) console.error("chat handler failed:", error);
+    const quota = refundQuota(res, quotaResult.before);
+    return res.status(known ? Number(error.status) || 502 : 500).json({
+      error: known ? error.message : "Ada kendala di server saat menghubungi model AI. Coba kirim ulang.",
+      quota,
+      refunded: true
+    });
   }
 }

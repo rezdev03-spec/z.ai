@@ -1,3 +1,5 @@
+import { getFreeChatModels } from "../lib/openrouter.js";
+
 const GROQ_MODELS = [
   { id: "openai/gpt-oss-20b", name: "GPT-OSS 20B", description: "Cepat dan serbaguna", vision: false },
   { id: "openai/gpt-oss-120b", name: "GPT-OSS 120B", description: "Lebih kuat untuk analisis", vision: false },
@@ -27,43 +29,17 @@ export default async function handler(req, res) {
   }
 
   if (process.env.OPENROUTER_API_KEY) {
-    try {
-      const response = await fetch("https://openrouter.ai/api/v1/models?output_modalities=text&sort=pricing-low-to-high", {
-        headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}` },
-        signal: AbortSignal.timeout(6000)
+    // Hanya model chat gratis; model keamanan/embedding/dll sudah disaring di lib/openrouter.js.
+    for (const model of await getFreeChatModels()) {
+      models.push({
+        provider: "openrouter",
+        id: model.id,
+        value: `openrouter::${model.id}`,
+        name: model.name,
+        description: "OpenRouter · gratis saat ini",
+        vision: model.vision,
+        available: true
       });
-      if (response.ok) {
-        const payload = await response.json();
-        const freeModels = (Array.isArray(payload.data) ? payload.data : [])
-          .filter(model => {
-            return model && typeof model.id === "string" &&
-              model.id.endsWith(":free") &&
-              Array.isArray(model?.architecture?.input_modalities) &&
-              model.architecture.input_modalities.includes("text") &&
-              Array.isArray(model?.architecture?.output_modalities) &&
-              model.architecture.output_modalities.includes("text") &&
-              model.id.length <= 160;
-          })
-          .sort((a, b) => {
-            const score = m => (/coder|code|dev|qwen|deepseek|gemini|gpt-oss/i.test(m.id) ? 0 : 1);
-            return score(a) - score(b) || String(a.name).localeCompare(String(b.name));
-          })
-          .slice(0, 24);
-
-        for (const model of freeModels) {
-          models.push({
-            provider: "openrouter",
-            id: model.id,
-            value: `openrouter::${model.id}`,
-            name: String(model.name || model.id).slice(0, 100),
-            description: "OpenRouter · gratis saat ini",
-            vision: Array.isArray(model?.architecture?.input_modalities) && model.architecture.input_modalities.includes("image"),
-            available: true
-          });
-        }
-      }
-    } catch (error) {
-      console.error("OpenRouter model list failed:", error);
     }
   }
 
