@@ -1,9 +1,9 @@
 {
   "name": "zennnyx-ai",
-  "version": "9.2.0",
+  "version": "9.3.0",
   "private": true,
   "scripts": {
-    "check": "node --check script.js && node --check markdown.js && node --check api/chat.js && node --check api/models.js && node --check lib/openrouter.js"
+    "check": "node --check script.js && node --check markdown.js && node --check api/chat.js && node --check api/models.js && node --check lib/openrouter.js && node --check lib/models.js"
   },
   "type": "module"
 }

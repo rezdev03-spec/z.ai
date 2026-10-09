@@ -35,7 +35,8 @@ let toastTimer = null;
 let recognition = null;
 let recording = false;
 let activeProject = null;
-let activeModel = "groq::openai/gpt-oss-20b";
+const AUTO_MODEL = { id: "auto", value: "auto::auto", provider: "auto", name: "Otomatis", description: "Pilih model terlancar, ganti sendiri kalau error", vision: true };
+let activeModel = AUTO_MODEL.value; // default: server memilih model paling lancar saat ini
 let serverQuota = null;
 let modelChoices = [];
 let guardTimer = null;
@@ -56,6 +57,61 @@ const icons = {
   preview: '<svg viewBox="0 0 24 24"><rect x="2.5" y="3.5" width="19" height="17"/><path d="M2.5 8h19M6 5.8h.1M9 5.8h.1"/></svg>',
   retry: '<svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.5-5.8M20 4v5h-5"/></svg>'
 };
+
+/* ───────────── Kelancaran model (dikirim ke server untuk memilih model otomatis) ───────────── */
+const HEALTH_KEY = "zennnyx_model_health_v1";
+function readHealth() {
+  try { const raw = JSON.parse(localStorage.getItem(HEALTH_KEY) || "{}"); return raw && typeof raw === "object" ? raw : {}; } catch { return {}; }
+}
+function noteAttempts(attempts) {
+  if (!Array.isArray(attempts) || !attempts.length) return;
+  const health = readHealth();
+  for (const a of attempts) {
+    if (!a || typeof a.value !== "string") continue;
+    const h = health[a.value] || { streak: 0, lastFailAt: 0, ms: 0, ok: 0 };
+    if (a.ok) { h.streak = 0; h.ok = Math.min(1000, (h.ok || 0) + 1); h.ms = h.ms ? Math.round(h.ms * 0.6 + a.ms * 0.4) : a.ms; }
+    else { h.streak = Math.min(10, (h.streak || 0) + 1); h.lastFailAt = Date.now(); }
+    health[a.value] = h;
+  }
+  try { localStorage.setItem(HEALTH_KEY, JSON.stringify(health)); } catch {}
+}
+
+/* ───────────── Ikon ───────────── */
+// Ikon resmi dimuat dari CDN (Lobe Icons). Mau ditaruh di server sendiri? Unduh file .svg-nya ke /icons lalu ganti ICON_BASE jadi "/icons/".
+const ICON_BASE = "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/";
+const BRAND_ICONS = [
+  [/gemini|gemma|google/, "gemini-color", false],
+  [/nvidia|nemotron/, "nvidia-color", false],
+  [/gpt|openai|\bo[134]\b/, "openai", true],
+  [/qwen/, "qwen-color", false],
+  [/deepseek/, "deepseek-color", false],
+  [/llama|meta-/, "meta-color", false],
+  [/mistral|mixtral|codestral/, "mistral-color", false],
+  [/glm|zhipu|z-ai/, "zai", true],
+  [/kimi|moonshot/, "kimi-color", false],
+  [/claude|anthropic/, "claude-color", false],
+  [/minimax/, "minimax-color", false],
+  [/microsoft|phi-/, "microsoft-color", false]
+];
+const GENERIC_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 14.4 9.6 21.5 12l-7.1 2.4L12 21.5l-2.4-7.1L2.5 12l7.1-2.4Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+const AUTO_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>';
+function brandIconHtml(key, className = "brand-img") {
+  const hit = BRAND_ICONS.find(([re]) => re.test(key));
+  if (!hit) return GENERIC_ICON;
+  const [, file, mono] = hit;
+  // Kalau gambar gagal dimuat, pasang ikon bawaan supaya tidak ada kotak kosong.
+  return `<img class="${className}${mono ? " mono" : ""}" src="${ICON_BASE}${file}.svg" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.outerHTML=window.znxGenericIcon">`;
+}
+window.znxGenericIcon = GENERIC_ICON;
+function faviconUrl(domain) { return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`; }
+function domainOf(url) { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } }
+function faviconImg(domain, cls = "source-favicon") {
+  const img = document.createElement("img");
+  img.className = cls; img.alt = ""; img.loading = "lazy"; img.decoding = "async"; img.referrerPolicy = "no-referrer";
+  img.src = faviconUrl(domain);
+  img.addEventListener("error", () => { const f = document.createElement("span"); f.className = `${cls} fallback`; f.innerHTML = icons.link; img.replaceWith(f); }, { once: true });
+  return img;
+}
 
 function jakartaDay(date = new Date()) {
   const p = new Intl.DateTimeFormat("en-CA", {timeZone:"Asia/Jakarta", year:"numeric", month:"2-digit", day:"2-digit"}).formatToParts(date);
@@ -221,7 +277,7 @@ function toggleFullscreen() {
 
 /* ───────────── Pesan ───────────── */
 
-function addAssistantActions(row, content, elapsedMs, usedThink, sources=[], webSearched=false, notes=[]) {
+function addAssistantActions(row, content, elapsedMs, usedThink, sources=[], webSearched=false, notes=[], modelLabel="") {
   const wrap=document.createElement("div");wrap.className="assistant-actions";
   const makeButton=(label,icon,fn)=>{
     const b=document.createElement("button");b.type="button";b.className="action-btn";b.innerHTML=`<span class="action-icon">${icon}</span><span class="action-label">${label}</span>`;b.addEventListener("click",fn);return b;
@@ -238,22 +294,36 @@ function addAssistantActions(row, content, elapsedMs, usedThink, sources=[], web
   wrap.appendChild(share);
 
   const liveSources=Array.isArray(sources)?sources.filter(s=>s&&typeof s.url==="string"&&safeUrl(s.url)!=="#").slice(0,8):[];
-  const fallbackUrls=webSearched?[]:extractUrls(content).map(url=>({title:url,url,domain:(()=>{try{return new URL(url).hostname}catch{return ""}})()}));
-  const sourceList=liveSources.length?liveSources:fallbackUrls;
+  const fallbackUrls=webSearched?[]:extractUrls(content).map(url=>({title:url,url,domain:domainOf(url)}));
+  const sourceList=(liveSources.length?liveSources:fallbackUrls).map(s=>({...s,domain:s.domain||domainOf(s.url)}));
   const source=makeButton("Sources",icons.link,()=>{
-    row.querySelectorAll(".sources-popover").forEach(el=>el.remove());
+    // Klik kedua menutup. (Dulu popover langsung dihapus lagi oleh handler klik dokumen karena tombol ini tidak punya penanda.)
+    const existing=row.querySelector(".sources-popover");
+    if(existing){existing.remove();return;}
+    document.querySelectorAll(".sources-popover").forEach(el=>el.remove());
     if(!sourceList.length)return;
     const pop=document.createElement("div");pop.className="sources-popover";
     const heading=document.createElement("div");heading.className="sources-title";heading.textContent=webSearched?"Sumber dari web untuk jawaban ini":"Tautan yang disebut dalam jawaban";
     pop.appendChild(heading);
     sourceList.forEach((s,i)=>{
-      const a=document.createElement("a");a.href=safeUrl(s.url);a.target="_blank";a.rel="noopener noreferrer";
-      a.textContent=`${i+1}. ${s.title||s.url}${s.domain?` — ${s.domain}`:""}`;pop.appendChild(a);
+      const a=document.createElement("a");a.className="source-item";a.href=safeUrl(s.url);a.target="_blank";a.rel="noopener noreferrer";
+      a.appendChild(faviconImg(s.domain));
+      const text=document.createElement("span");text.className="source-text";
+      const t=document.createElement("strong");t.textContent=`${i+1}. ${s.title||s.url}`;
+      const d=document.createElement("small");d.textContent=s.domain||s.url;
+      text.append(t,d);a.appendChild(text);
+      pop.appendChild(a);
       if(s.snippet){const p=document.createElement("p");p.className="source-snippet";p.textContent=s.snippet;pop.appendChild(p);}
     });
     row.appendChild(pop);
   });
+  source.dataset.sources="1";
   source.disabled=!sourceList.length;
+  if(sourceList.length){
+    const stack=document.createElement("span");stack.className="favicon-stack";
+    [...new Map(sourceList.filter(x=>x.domain).map(x=>[x.domain,x])).keys()].slice(0,3).forEach(dm=>stack.appendChild(faviconImg(dm,"stack-favicon")));
+    source.querySelector(".action-icon").replaceWith(stack);
+  }
   wrap.appendChild(source);
 
   const project=extractProjectFiles(content);
@@ -265,7 +335,7 @@ function addAssistantActions(row, content, elapsedMs, usedThink, sources=[], web
 
   const elapsed=(Math.max(0,elapsedMs)/1000).toFixed(1);
   const meta=document.createElement("div");meta.className="answer-meta";
-  meta.textContent=`Dibuat ${elapsed} dtk${usedThink?" · Think Harder":""}${webSearched?" · Web dicari":""}`;
+  meta.textContent=`Dibuat ${elapsed} dtk${usedThink?" · Think Harder":""}${webSearched?" · Web dicari":""}${modelLabel?` · ${modelLabel}`:""}`;
   const answer=row.querySelector(".answer");
   const noteEls=notes.map(text=>{const n=document.createElement("div");n.className="answer-note";n.textContent=text;return n;});
   const top=[meta,...noteEls];
@@ -282,7 +352,7 @@ function addAssistantActions(row, content, elapsedMs, usedThink, sources=[], web
 }
 
 function addMessage(role, content, options={}) {
-  const {elapsedMs=0,usedThink=false,imageData=null,sources=[],webSearched=false,notes=[]}=options;
+  const {elapsedMs=0,usedThink=false,imageData=null,sources=[],webSearched=false,notes=[],modelLabel=""}=options;
   const row=document.createElement("article");
   row.className=`message ${role}`;
   row.style.animation="rise-in .22s ease both";
@@ -297,7 +367,7 @@ function addMessage(role, content, options={}) {
     const img=document.createElement("img");img.className="message-image";img.src=imageData;img.alt="Lampiran gambar";body.prepend(img);
   }
   row.appendChild(body);
-  if(role==="assistant")addAssistantActions(row,content,elapsedMs,usedThink,sources,webSearched,notes);
+  if(role==="assistant")addAssistantActions(row,content,elapsedMs,usedThink,sources,webSearched,notes,modelLabel);
   row.querySelectorAll("[data-copy-code]").forEach(btn=>btn.addEventListener("click",()=>copyText(decodeURIComponent(btn.dataset.copyCode||""),btn)));
   appendMessageElement(row);
   if(role==="assistant")hydrateMath(body);
@@ -395,19 +465,14 @@ function updateSendState() {
   const remaining=serverQuota&&serverQuota.day===jakartaDay()?serverQuota.remaining:Math.max(0,DAILY_LIMIT-readLocalQuota().used);
   if(remaining<=0) $("composerHint").textContent="Kuota 20 pesan hari ini habis · kembali besok WIB";
   else if(clientGuardRemaining()>0) $("composerHint").textContent="Jeda sebentar sebelum pesan berikutnya";
-  else $("composerHint").textContent="Enter kirim · Shift+Enter baris baru";
+  else $("composerHint").textContent="Enter baris baru · Ctrl+Enter kirim";
   scheduleGuardUnlock();
 }
 
 function modelIconMarkup(model) {
+  if(model?.provider==="auto")return AUTO_ICON;
   const key=`${String(model?.id||"").toLowerCase()} ${String(model?.name||"").toLowerCase()}`;
-  if(/gemini/.test(key)) return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1.8 14.5 9.5 22.2 12l-7.7 2.5L12 22.2l-2.5-7.7L1.8 12l7.7-2.5Z"/></svg>';
-  if(/nvidia/.test(key)) return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12c3.5-7.5 16.5-7.5 20 0-3.5 7.5-16.5 7.5-20 0Z"/><circle cx="12" cy="12" r="4.4"/><circle cx="12" cy="12" r="1.5"/></svg>';
-  if(/qwen/.test(key)) return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2.5 8.3 4.8v9.4L12 21.5l-8.3-4.8V7.3Z"/><path d="M8 8h8v8H8zM8 8l8 8M16 8l-8 8"/></svg>';
-  if(/deepseek/.test(key)) return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8.5c3-4.8 9-5.5 13-1.8 1.4 1.3 2.3 3.1 2.4 5.1.1 2.7-1.9 4.7-4.7 4.7H8.4A5.4 5.4 0 0 1 3 11.1Z"/><path d="M8 11.5c1.6-2.5 5.1-2.5 6.6 0M17.5 7.5l3 1.3-1.2 3"/></svg>';
-  if(/gpt|openai/.test(key)) return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.1 16 5.4v4.5l4 2.3v4.5L16 19l-4 2.2L8 19l-4-2.3v-4.5l4-2.3V5.4Z"/><path d="m8 5.4 8 13.6M16 5.4 8 19M4 12.2h16"/></svg>';
-  if(/llama|meta/.test(key)) return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 14c2-7 6-8 9.5-2s7.5 5 9.5-2M2.5 9c2 7 6 8 9.5 2s7.5-5 9.5 2"/></svg>';
-  return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5 14.4 9.6 21.5 12l-7.1 2.4L12 21.5l-2.4-7.1L2.5 12l7.1-2.4Z"/></svg>';
+  return brandIconHtml(key);
 }
 function displayModelName(model) {
   return String(model?.name||model?.id||"Model AI")
@@ -427,7 +492,7 @@ function renderModelPicker() {
     modelPickerList.appendChild(empty);
     return;
   }
-  for(const model of modelChoices) {
+  for(const model of [AUTO_MODEL,...modelChoices]) {
     const option=document.createElement("button");
     option.type="button";
     option.className="model-picker-option";
@@ -442,7 +507,7 @@ function renderModelPicker() {
     const title=document.createElement("strong");
     title.textContent=displayModelName(model);
     const desc=document.createElement("small");
-    desc.textContent=model.vision?"Bisa menerima gambar":(model.provider==="openrouter"?"Gratis saat ini":(model.description||"Model chat"));
+    desc.textContent=model.provider==="auto"?model.description:model.vision?"Bisa menerima gambar":(model.provider==="openrouter"?"Gratis saat ini":(model.description||"Model chat"));
     copy.append(title,desc);
     const check=document.createElement("span");
     check.className="model-option-check";
@@ -469,6 +534,7 @@ function buildModelOptions(models, providers) {
     return;
   }
 
+  const autoOpt=document.createElement("option");autoOpt.value=AUTO_MODEL.value;autoOpt.textContent="Otomatis (terlancar)";modelSelect.appendChild(autoOpt);
   const groups=new Map();
   for(const model of modelChoices){
     if(!groups.has(model.provider))groups.set(model.provider,[]);
@@ -492,16 +558,15 @@ function buildModelOptions(models, providers) {
 
   let saved="";
   try { saved=localStorage.getItem("zennnyx_selected_model")||""; } catch {}
-  activeModel=modelChoices.some(m=>m.value===saved)
-    ? saved
-    : (modelChoices.find(m=>m.value==="groq::openai/gpt-oss-20b")?.value||modelChoices[0].value);
+  // Default = Otomatis: server memilih model paling lancar/efisien saat ini (tidak lagi dikunci ke satu model).
+  activeModel=saved===AUTO_MODEL.value||modelChoices.some(m=>m.value===saved)?saved:AUTO_MODEL.value;
   modelSelect.value=activeModel;
   updateModelLabel();
   renderModelPicker();
   updateSendState();
 }
 function updateModelLabel() {
-  const model=modelChoices.find(m=>m.value===activeModel);
+  const model=activeModel===AUTO_MODEL.value&&modelChoices.length?AUTO_MODEL:modelChoices.find(m=>m.value===activeModel);
   const label=model?displayModelName(model):"Pilih model";
   $("selectedModelLabel").textContent=label;
   $("sidebarModelName").textContent=label;
@@ -595,10 +660,11 @@ async function runRequest(userContent) {
       method:"POST",
       headers:{"Content-Type":"application/json"},
       credentials:"same-origin",
-      body:JSON.stringify({messages:prepareHistoryForRequest(),thinkHarder,modelChoice:activeModel,webSearch:webMode})
+      body:JSON.stringify({messages:prepareHistoryForRequest(),thinkHarder,modelChoice:activeModel,webSearch:webMode,health:readHealth()})
     });
     responseData=await response.json().catch(()=>({}));
     if(responseData.quota)updateQuota(responseData.quota);
+    noteAttempts(responseData.attempts);
     const delay=Math.max(0,900-(performance.now()-started));
     if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
     removeTyping();
@@ -608,11 +674,12 @@ async function runRequest(userContent) {
     const sources=Array.isArray(responseData.sources)?responseData.sources:[];
     const notes=[];
     if(responseData.searchError)notes.push(`Web search tidak jalan: ${responseData.searchError}`);
+    const nameOf=id=>{const m=modelChoices.find(x=>x.id===id);return m?displayModelName(m):String(id).replace(/:free$/,"").split("/").pop();};
     if(responseData.fallbackFrom&&responseData.model){
-      const nameOf=id=>{const m=modelChoices.find(x=>x.id===id);return m?displayModelName(m):String(id).replace(/:free$/,"").split("/").pop();};
       notes.push(`${nameOf(responseData.fallbackFrom)} sedang bermasalah, jadi dijawab otomatis oleh ${nameOf(responseData.model)}.`);
     }
-    addMessage("assistant",reply,{elapsedMs:elapsed,usedThink:Boolean(responseData.thinkHarder),sources,webSearched:Boolean(responseData.webSearched),notes});
+    const modelLabel=responseData.model?nameOf(responseData.model):"";
+    addMessage("assistant",reply,{elapsedMs:elapsed,usedThink:Boolean(responseData.thinkHarder),sources,webSearched:Boolean(responseData.webSearched),notes,modelLabel});
     messages.push({role:"assistant",content:reply,sources});
     if(messages.length>16)messages=messages.slice(-16);
     const project=extractProjectFiles(reply);
@@ -624,6 +691,7 @@ async function runRequest(userContent) {
   } catch(error) {
     const delay=Math.max(0,900-(performance.now()-started));
     if(delay)await new Promise(resolve=>setTimeout(resolve,delay));
+    noteAttempts(responseData.attempts);
     removeTyping();
     // Pesan user tidak masuk riwayat model kalau gagal; tetap tampil di layar dan bisa dikirim ulang.
     if(messages.length&&messages[messages.length-1]?.role==="user")messages.pop();
@@ -706,7 +774,7 @@ modelPickerBtn.addEventListener("click",e=>{
 modelPickerList.addEventListener("click",e=>{
   const option=e.target.closest("[data-model-value]");
   if(!option)return;
-  const chosen=modelChoices.find(m=>m.value===option.dataset.modelValue);
+  const chosen=[AUTO_MODEL,...modelChoices].find(m=>m.value===option.dataset.modelValue);
   if(!chosen)return;
   activeModel=chosen.value;
   modelSelect.value=activeModel;
@@ -726,11 +794,12 @@ attachPopover.querySelectorAll(".attach-menu-item").forEach(btn=>btn.addEventLis
 imageInput.addEventListener("change",()=>{prepareImage(imageInput.files?.[0]);togglePopover(attachPopover,false);});
 cameraInput.addEventListener("change",()=>{prepareImage(cameraInput.files?.[0]);togglePopover(attachPopover,false);});
 input.addEventListener("input",()=>{resizeInput();updateSendState();});
+// Enter = baris baru (perilaku bawaan textarea). Kirim lewat tombol panah, atau Ctrl/Cmd + Enter di keyboard fisik.
 input.addEventListener("keydown",e=>{
-  if(e.key==="Enter"&&!e.isComposing&&!e.shiftKey){
+  if(e.key==="Enter"&&!e.isComposing&&(e.ctrlKey||e.metaKey)){
     e.preventDefault();
     sendMessage();
-  } else if(e.key==="Enter"&&e.shiftKey){
+  } else if(e.key==="Enter"){
     requestAnimationFrame(resizeInput);
   }
 });
@@ -749,7 +818,7 @@ document.addEventListener("click",e=>{
     togglePopover(modelPickerPopover,false);
     modelPickerBtn.setAttribute("aria-expanded","false");
   }
-  if(!e.target.closest(".sources-popover")&&!e.target.closest('[aria-label="Sources"]'))document.querySelectorAll(".sources-popover").forEach(el=>el.remove());
+  if(!e.target.closest(".sources-popover")&&!e.target.closest("[data-sources]"))document.querySelectorAll(".sources-popover").forEach(el=>el.remove());
 });
 document.addEventListener("keydown",e=>{
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();resetToNewChat();input.focus();}

@@ -1,4 +1,4 @@
-# ZennNyx AI v9.2 — Workspace
+# ZennNyx AI v9.3 — Workspace
 
 Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model picker, full-screen website preview, KaTeX math, real web sources, and a 20-message daily quota (WIB).
 
@@ -17,6 +17,14 @@ Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model p
 - `PUBLIC_APP_URL` (optional; OpenRouter attribution)
 
 API keys stay on the server.
+
+## v9.3 — what changed
+- **Sources**: tombol *Sources* sekarang membuka daftar tautan. Penyebabnya bug klik: popover dibuat lalu langsung dihapus handler klik dokumen. Tiap sumber kini punya ikon situs (favicon) + judul + domain; tombolnya menampilkan tumpukan favicon.
+- **Model otomatis**: default baru = *Otomatis*. Server memilih model dari semua provider berdasarkan kelancaran (gagal baru-baru ini = turun, lambat = turun, sering sukses = naik). Nilai awal ada di `lib/models.js` (`prior`). Catatan kelancaran disimpan di browser (`zennnyx_model_health_v1`) dan dikirim ke server.
+- **Auto-switch**: error apa pun (limit, 5xx, timeout, jawaban kosong, key salah di satu provider) -> otomatis coba model lain lintas Groq/Gemini/OpenRouter, maksimal 4 percobaan dalam batas waktu 55 dtk. Berlaku juga kalau user memilih model manual.
+- **Enter** = baris baru. Kirim lewat tombol panah atau Ctrl/Cmd+Enter.
+- **Ikon merek** (OpenAI, Gemini, NVIDIA, Qwen, DeepSeek, Meta, Mistral, dll.) dimuat dari CDN Lobe Icons; ada ikon cadangan kalau gagal dimuat. Mau self-host: unduh SVG-nya ke `/icons` dan ubah `ICON_BASE` di `script.js`.
+- **Composer** lebih membulat dan diberi jarak dari tepi layar. **Teks** jawaban AI dan pesan user diperbesar.
 
 ## v9.2 — what changed
 **Errors / OpenRouter**

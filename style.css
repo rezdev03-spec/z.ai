@@ -363,3 +363,78 @@ body.preview-mode .topbar, body.preview-mode .composer-wrap { display: none; }
   .composer-context #selectedModelLabel { max-width:48%; }
   .composer-context .quota-inline { font-size:7px; }
 }
+
+/* ───────────── v9.3 ───────────── */
+
+/* Teks lebih besar: jawaban AI dan pesan user */
+.bubble { font-size: 16px; line-height: 1.62; }
+.answer { font-size: 17px; line-height: 1.75; }
+.markdown table { font-size: 13px; }
+.code-block { font-size: 13px; }
+.answer-meta { font-size: 10px; }
+.answer-disclaimer { font-size: 10px; }
+.action-btn, .action-label { font-size: 11px; }
+
+/* Composer: sudut membulat dan tidak menempel ke tepi layar (layar HP juga membulat) */
+.composer-wrap { bottom: calc(var(--keyboard-inset) + max(14px, env(safe-area-inset-bottom))); }
+.composer-shell { border-radius: 26px; border: 1px solid var(--border-strong); background: var(--surface); box-shadow: 0 1px 0 rgba(0,0,0,.03), 0 8px 24px -14px rgba(0,0,0,.28); }
+.composer-context { padding: 10px 20px 0; font-size: 9px; }
+.composer-context .quota-inline { font-size: 9px; }
+.composer { min-height: 56px; padding: 6px 8px 8px 10px; gap: 4px; align-items: flex-end; }
+.composer-icon, .send-btn { width: 38px; height: 38px; border-radius: 50%; }
+.send-btn { border-radius: 50%; }
+.model-picker-trigger { width: 46px; min-width: 46px; height: 38px; border-radius: 19px; }
+textarea { font-size: 16px; line-height: 1.45; padding: 9px 6px; min-height: 38px; }
+.model-picker-popover, .attach-popover { border-radius: 20px; }
+.attach-popover { left: 8px; padding: 6px; }
+.model-picker-popover { left: 14px; }
+.attach-menu-item { border-radius: 14px; }
+.menu-icon { border-radius: 10px; }
+.model-option-icon { border-radius: 10px; }
+.image-preview img { border-radius: 12px; }
+.image-preview { padding-left: 10px; }
+.chat { padding-bottom: calc(235px + var(--keyboard-inset)); }
+.message { scroll-margin-bottom: calc(220px + var(--keyboard-inset)); }
+
+@media (max-width: 680px) {
+  .composer-wrap { width: calc(100% - 28px); bottom: calc(var(--keyboard-inset) + max(14px, env(safe-area-inset-bottom))); }
+  .composer-shell { border-radius: 24px; }
+  .composer { min-height: 54px; padding: 5px 6px 7px 8px; gap: 2px; }
+  .composer-icon, .send-btn { width: 36px; height: 38px; }
+  .send-btn { border-radius: 50%; width: 38px; }
+  .model-picker-trigger { width: 44px; min-width: 44px; }
+  textarea { font-size: 16px; min-height: 38px; }
+  .composer-context { padding: 9px 16px 0; }
+  .bubble { font-size: 15.5px; max-width: 91%; }
+  .answer { font-size: 16.5px; }
+  .markdown table { font-size: 12.5px; }
+  .chat { padding-bottom: calc(245px + var(--keyboard-inset)); }
+  .model-picker-popover { left: 4px; }
+}
+
+/* Ikon merek model */
+.brand-img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.model-option-icon, .model-picker-trigger-icon { color: var(--text); }
+.model-option-icon { padding: 5px; }
+.model-option-icon .brand-img, .model-option-icon svg { width: 100%; height: 100%; }
+.model-picker-trigger-icon { width: 20px; height: 20px; }
+.model-picker-trigger-icon .brand-img, .model-picker-trigger-icon svg { width: 20px; height: 20px; }
+@media (prefers-color-scheme: dark) { .brand-img.mono { filter: invert(1); } }
+
+/* Sources dengan ikon situs */
+.sources-popover { border-radius: 16px; padding: 10px; }
+.sources-title { padding: 2px 6px 6px; }
+.sources-popover a.source-item { display: flex; align-items: center; gap: 11px; margin: 0; padding: 9px 8px; border-radius: 12px; text-decoration: none; }
+.sources-popover a.source-item:hover { background: var(--surface-2); }
+.source-favicon { flex: 0 0 auto; width: 22px; height: 22px; border-radius: 6px; object-fit: contain; background: var(--surface-2); }
+.source-favicon.fallback { display: inline-grid; place-items: center; color: var(--muted); }
+.source-favicon.fallback svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; }
+.source-text { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.source-text strong { font-size: 12.5px; font-weight: 650; line-height: 1.35; overflow-wrap: anywhere; }
+.source-text small { color: var(--muted); font-size: 10.5px; overflow-wrap: anywhere; }
+.source-snippet { margin: -2px 8px 8px 41px; font-size: 11px; }
+.favicon-stack { display: inline-flex; align-items: center; }
+.stack-favicon { width: 17px; height: 17px; margin-left: -5px; border: 1.5px solid var(--bg); border-radius: 50%; background: var(--surface-2); object-fit: contain; }
+.stack-favicon:first-child { margin-left: 0; }
+.stack-favicon.fallback { display: inline-grid; place-items: center; }
+.stack-favicon.fallback svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2; }
