@@ -1,4 +1,4 @@
-# ZennNyx AI v9.8 — Workspace
+# ZennNyx AI v9.11 — Workspace
 
 Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model picker, full-screen website preview, KaTeX math, real web sources, and a 20-message daily quota (WIB).
 
@@ -8,6 +8,9 @@ Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model p
 3. Run `npm run check` locally if you want to syntax-check everything.
 
 ## Environment variables
+- `MISTRAL_API_KEY` (optional; Mistral, paket gratis "Experiment": verifikasi nomor HP, tanpa kartu kredit; data bisa dipakai Mistral untuk training)
+- `NVIDIA_API_KEY` (optional; NVIDIA NIM dari build.nvidia.com, gratis, verifikasi nomor HP, kira-kira 40 permintaan/menit per akun)
+- `MISTRAL_MODELS`, `NVIDIA_MODELS` (optional; ganti daftar model, dipisah koma, tanpa edit kode)
 - `GROQ_API_KEY` (needed for Groq models)
 - `GEMINI_API_KEY` (optional; Gemini models)
 - `OPENROUTER_API_KEY` (optional; the picker lists free **chat** models only)
@@ -17,6 +20,19 @@ Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model p
 - `PUBLIC_APP_URL` (optional; OpenRouter attribution)
 
 API keys stay on the server.
+
+## v9.11 — what changed (Mistral + NVIDIA NIM, gratis)
+- `lib/models.js`: `COMPAT_PROVIDERS` = daftar provider berformat OpenAI-compatible. Sekarang berisi Mistral (`mistral-small-latest`, `mistral-large-latest`) dan NVIDIA NIM (`meta/llama-3.3-70b-instruct`, `nvidia/llama-3.3-nemotron-super-49b-v1`). Muncul di picker begitu API key-nya ada. Tambah provider gratis lain yang OpenAI-compatible = tambah satu blok di sini.
+- `api/chat.js`: satu fungsi `callCompat()` melayani semuanya. Error apa pun (limit, model tidak ada, key salah) -> auto-switch ke model lain seperti biasa.
+- Nama model resmi bisa berubah. Kalau sebuah model 404, ganti lewat `MISTRAL_MODELS` / `NVIDIA_MODELS` di Vercel (daftar model ada di dashboard masing-masing).
+- Tidak ada kode provider berbayar di versi ini.
+
+## v9.9 — what changed (`api/chat.js` + `script.js`)
+Masalah: di mode Otomatis, tiap pesan bisa dijawab model berbeda (mis. Gemini lalu GPT-OSS 20B). Model kecil sering salah menafsirkan pesan lanjutan yang berupa cerita/pendapat, mis. menjawab "teman atau saudara" padahal user menyebut Douyin dan nama orang.
+- **Model lengket**: browser mengingat model yang menjawab giliran terakhir (`lastUsedModel`) dan mengirimnya sebagai `stickyModel`. Di mode Otomatis server memakai model itu lagi selama masih sehat, jadi gaya dan pemahaman konteks tidak berganti tiap pesan. Kalau model itu baru gagal/limit, ranking kelancaran biasa dan auto-switch tetap jalan. Chat baru mereset ini. Memilih model manual tidak berubah.
+- **Blok "KESINAMBUNGAN PERCAKAPAN"** di system prompt (`buildContinuity`), dikirim ke SEMUA model mulai pesan kedua: topik awal, pesan user sebelumnya, inti jawaban terakhir, pesan sekarang, plus aturan: tanggapi detail spesifik user (platform, nama, produk), jangan mengganti dengan skenario generik, jangan menukar sudut pandang, sambungkan ke topik awal.
+- **Web search tidak lagi dipicu cerita/pendapat lanjutan**: pesan lanjutan tanpa tanda tanya/kata tanya dan tanpa kata "terbaru/harga/hari ini" tidak memicu pencarian hanya karena ada kata seperti "hp", "juara", "iPhone". Hasil web yang melenceng sebelumnya bisa mengacaukan model kecil. Pertanyaan lanjutan ("berapa harga iQOO 15 sekarang?") tetap mencari.
+- Batas: ini mengurangi, bukan menjamin nol salah tafsir. Model kecil tetap lebih sering meleset daripada model besar. Kalau ingin paling konsisten, pilih satu model manual di picker.
 
 ## v9.8 — what changed (client only: `index.html`, `style.css`, `script.js`)
 - Saat AI loading, di samping animasi titik kini ada teks status: **"Searching the web…"** (±3,5 dtk pertama, hanya bila web search diperkirakan dipakai), lalu **"Thinking…"**, dan **"Still thinking…"** kalau jawaban butuh >12 dtk. Mode Think Harder menampilkan "Thinking harder…". Teksnya ada di konstanta `STATUS_LABEL` di `script.js`. Server membalas sekali jadi (tanpa streaming), jadi fase ini perkiraan di sisi browser.

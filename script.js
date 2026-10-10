@@ -691,7 +691,7 @@ function buildModelOptions(models, providers) {
     if(!groups.has(model.provider))groups.set(model.provider,[]);
     groups.get(model.provider).push(model);
   }
-  const hiddenGroupNames={groq:"Groq",gemini:"Gemini",openrouter:"Gratis"};
+  const hiddenGroupNames={groq:"Groq",gemini:"Gemini",mistral:"Mistral",nvidia:"NVIDIA",openrouter:"Gratis"};
   for(const [provider,list] of groups) {
     const group=document.createElement("optgroup");
     group.label=hiddenGroupNames[provider]||"Model";
