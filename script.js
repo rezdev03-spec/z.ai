@@ -827,7 +827,7 @@ async function runRequest(userContent) {
     if(responseData.searchError)notes.push(`Web search tidak jalan: ${responseData.searchError}`);
     const nameOf=id=>{const m=modelChoices.find(x=>x.id===id);return m?displayModelName(m):String(id).replace(/:free$/,"").split("/").pop();};
     if(responseData.fallbackFrom&&responseData.model){
-      notes.push(`${nameOf(responseData.fallbackFrom)} sedang bermasalah, jadi dijawab otomatis oleh ${nameOf(responseData.model)}.`);
+      notes.push(`${nameOf(responseData.fallbackFrom)} sedang bermasalah, jadi dijawab otomatis oleh ${nameOf(responseData.model)}.${responseData.fallbackReason?` Penyebab: ${responseData.fallbackReason}`:""}`);
     }
     const modelLabel=responseData.model?nameOf(responseData.model):"";
     addMessage("assistant",reply,{elapsedMs:elapsed,usedThink:Boolean(responseData.thinkHarder),sources,webSearched:Boolean(responseData.webSearched),notes,modelLabel,animate:true});

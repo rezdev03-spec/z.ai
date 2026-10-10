@@ -1,4 +1,4 @@
-# ZennNyx AI v9.11 — Workspace
+# ZennNyx AI v9.12 — Workspace
 
 Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model picker, full-screen website preview, KaTeX math, real web sources, and a 20-message daily quota (WIB).
 
@@ -20,6 +20,10 @@ Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model p
 - `PUBLIC_APP_URL` (optional; OpenRouter attribution)
 
 API keys stay on the server.
+
+## v9.12 — what changed (`api/chat.js`, `script.js`)
+- Catatan "X sedang bermasalah, jadi dijawab otomatis oleh Y" sekarang diikuti **Penyebab:** (mis. "API key ditolak", "limit tercapai", "model tidak ditemukan"), diambil dari error asli provider.
+- API key Mistral/NVIDIA dibersihkan dulu sebelum dipakai (spasi, baris baru, tanda kutip, awalan "Bearer" dibuang), karena key yang ditempel dari HP sering membawanya dan membuat request gagal.
 
 ## v9.11 — what changed (Mistral + NVIDIA NIM, gratis)
 - `lib/models.js`: `COMPAT_PROVIDERS` = daftar provider berformat OpenAI-compatible. Sekarang berisi Mistral (`mistral-small-latest`, `mistral-large-latest`) dan NVIDIA NIM (`meta/llama-3.3-70b-instruct`, `nvidia/llama-3.3-nemotron-super-49b-v1`). Muncul di picker begitu API key-nya ada. Tambah provider gratis lain yang OpenAI-compatible = tambah satu blok di sini.
