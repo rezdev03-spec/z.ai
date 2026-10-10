@@ -1,4 +1,4 @@
-# ZennNyx AI v9.3 — Workspace
+# ZennNyx AI v9.8 — Workspace
 
 Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model picker, full-screen website preview, KaTeX math, real web sources, and a 20-message daily quota (WIB).
 
@@ -18,9 +18,10 @@ Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model p
 
 API keys stay on the server.
 
-## v9.8 — what changed (client only)
-- Indikator loading baru: glyph logo ZennNyx yang berputar (8 jari menyala bergantian), status yang berganti ("Berpikir…", "Mencari di web…", "Membaca sumber…", "Menyusun jawaban…") dan stopwatch detik. Tahapannya berbasis waktu karena server tidak mengirim progres; teks "Mencari di web…" hanya muncul kalau Web Search disetel *Selalu*.
-- Popup "Tentang proyek" saat masuk web (sekali per sesi; centang "Jangan tampilkan lagi" untuk mematikan permanen, tombol *Tentang* di footer sidebar membukanya lagi). Isi: proyek API gratisan, kreator @zennlonevyn (TikTok), karya lain clip.zone.id dan zenn-url.my.id. Kunci localStorage: `zennnyx_welcome_hide_v1`.
+## v9.8 — what changed (client only: `index.html`, `style.css`, `script.js`)
+- Saat AI loading, di samping animasi titik kini ada teks status: **"Searching the web…"** (±3,5 dtk pertama, hanya bila web search diperkirakan dipakai), lalu **"Thinking…"**, dan **"Still thinking…"** kalau jawaban butuh >12 dtk. Mode Think Harder menampilkan "Thinking harder…". Teksnya ada di konstanta `STATUS_LABEL` di `script.js`. Server membalas sekali jadi (tanpa streaming), jadi fase ini perkiraan di sisi browser.
+- Pop-up pengenalan project saat website dibuka: tombol close (×, tombol Tutup, klik latar, atau Esc) dan checkbox **Jangan tampilkan lagi** (disimpan di `localStorage` kunci `zennnyx_intro_hidden_v1`). Tanpa dicentang, pop-up muncul lagi di kunjungan berikutnya. Mau reset: hapus kunci itu lewat DevTools.
+- Edit isi pop-up di `index.html` (blok `#introModal`).
 
 ## v9.7 — what changed (client only, `markdown.js` + `script.js`)
 - Tautan `<https://…>` (autolink Markdown) sekarang bisa diklik; sebelumnya tampil sebagai teks mentah.

@@ -507,36 +507,49 @@ function addErrorMessage(text, retry) {
   appendMessageElement(row);
   return row;
 }
-// Indikator "AI sedang bekerja": glyph logo ZennNyx yang berputar + status yang berganti + stopwatch.
-// Tahapannya berbasis waktu (server tidak mengirim progres), jadi teksnya sengaja tidak mengklaim hal yang belum pasti.
-let thinkingTimer=null;
-function thinkingSteps() {
-  if(webMode==="on")return [[0,"Mencari di web…"],[4,"Membaca sumber…"],[9,"Menyusun jawaban…"]];
-  if(thinkHarder)return [[0,"Berpikir lebih dalam…"],[5,"Menimbang beberapa sudut…"],[11,"Menyusun jawaban…"]];
-  return [[0,"Berpikir…"],[3,"Menyusun jawaban…"]];
+/* ───────────── Indikator "Thinking" / "Searching" saat AI loading ─────────────
+   Server membalas sekali jadi (tanpa streaming), jadi label diganti berdasarkan perkiraan tahapan.
+   Ubah teksnya di STATUS_LABEL di bawah ini. */
+const STATUS_LABEL={thinking:"Thinking…",thinkingHard:"Thinking harder…",searching:"Searching the web…",still:"Still thinking…"};
+// Perkiraan ringan apakah server akan memakai web search (cermin sederhana dari shouldSearchWeb di api/chat.js).
+const GUESS_CHITCHAT=/^(hai|halo|hallo|hello|hi|hey|ok|oke|okay|sip|mantap|thanks|thank you|makasih|terima kasih|wkwk\w*|haha\w*|lol|yo|test|tes|lanjut|lanjutkan|siapa kamu|kamu siapa|who are you|what are you)\b[!.,? ]*$/i;
+const GUESS_EXPLICIT=/\b(cari(?:kan|in|\s?tau|\s?tahu)?|search|googling|google|browsing|telusuri|web search|kasih (?:sumber|link|referensi)|sertakan (?:sumber|link|referensi))\b/i;
+const GUESS_OFFLINE=/\b(bikin|buatkan|buatin|buat|tuliskan|tulis|rewrite|parafrase|ringkas|rangkum|terjemahkan|translate|debug|perbaiki|fix|refactor|javascript|typescript|html|css|python|kode|code|script|regex|sql|website|landing page|puisi|cerita|caption|hitung|selesaikan|kerjakan|integral|turunan|persamaan|rumus|solve|simplify|ubah|convert)\b/i;
+const GUESS_FRESH=/\b(sekarang|saat ini|hari ini|kemarin|besok|terbaru|terkini|latest|today|current|2025|2026|2027|update|berita|news|jadwal|skor|harga|price|rilis|release|cuaca|weather|kurs)\b/i;
+const GUESS_QUESTION=/\b(apa itu|apa arti|apakah|apa|siapa|kapan|di ?mana|dimana|berapa|mengapa|kenapa|bagaimana|gimana|jelaskan|jelasin|what|who|when|where|why|which|how|rekomendasi|terbaik|best)\b/i;
+function userTextOf(content){
+  if(typeof content==="string")return content;
+  if(Array.isArray(content))return content.filter(p=>p?.type==="text").map(p=>p.text).join(" ");
+  return "";
 }
-function addTyping() {
-  clearInterval(thinkingTimer);
+function guessWillSearch(content){
+  if(!webAvailable||webMode==="off")return false;
+  const q=userTextOf(content).toLowerCase().trim();
+  if(!q||GUESS_CHITCHAT.test(q))return false;
+  if(webMode==="on"||GUESS_EXPLICIT.test(q))return true;
+  if(Array.isArray(content)&&content.some(p=>p?.type==="image_url"))return false;
+  if(GUESS_OFFLINE.test(q))return GUESS_FRESH.test(q);
+  return GUESS_FRESH.test(q)||GUESS_QUESTION.test(q);
+}
+let typingTimers=[];
+function setTypingLabel(text){
+  const el=$("typingLabel");
+  if(!el||el.textContent===text)return;
+  el.textContent=text;
+  el.classList.remove("swap");void el.offsetWidth;el.classList.add("swap");
+}
+function addTyping(userContent) {
   const row=document.createElement("article");row.id="typing";row.className="message assistant";
-  const spokes=Array.from({length:8},(_,k)=>`<path class="tg-spoke" style="--k:${k}" d="M16 3.5v5" transform="rotate(${k*45} 16 16)"/>`).join("");
-  row.innerHTML=`<div class="answer thinking" role="status" aria-live="polite"><svg class="think-glyph" viewBox="0 0 32 32" aria-hidden="true">${spokes}<path class="tg-hex" d="m12 9.5 8 0 4.5 6.5-4.5 6.5h-8L7.5 16Z"/><circle class="tg-core" cx="16" cy="16" r="3.1"/></svg><span class="think-text"></span><span class="think-time"></span></div>`;
-  const textEl=row.querySelector(".think-text"),timeEl=row.querySelector(".think-time");
-  const steps=thinkingSteps();
-  const t0=Date.now();
-  let shown="";
-  const tick=()=>{
-    const sec=Math.floor((Date.now()-t0)/1000);
-    let label=steps.filter(([at])=>sec>=at).pop()[1];
-    if(sec>=30)label="Model lagi lambat, tetap ditunggu ya…";
-    else if(sec>=16)label="Masih bekerja, jawabannya agak panjang…";
-    if(label!==shown){shown=label;textEl.textContent=label;textEl.classList.remove("swap");void textEl.offsetWidth;textEl.classList.add("swap");}
-    timeEl.textContent=sec>=2?`${sec} dtk`:"";
-  };
-  tick();
-  thinkingTimer=setInterval(tick,500);
+  row.innerHTML='<div class="answer typing" role="status"><span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span><span id="typingLabel" class="typing-label"></span></div>';
   appendMessageElement(row);
+  typingTimers.forEach(clearTimeout);typingTimers=[];
+  const searching=guessWillSearch(userContent);
+  const base=thinkHarder?STATUS_LABEL.thinkingHard:STATUS_LABEL.thinking;
+  setTypingLabel(searching?STATUS_LABEL.searching:base);
+  if(searching)typingTimers.push(setTimeout(()=>setTypingLabel(base),3500));
+  typingTimers.push(setTimeout(()=>setTypingLabel(STATUS_LABEL.still),thinkHarder?20000:12000));
 }
-function removeTyping() { clearInterval(thinkingTimer);thinkingTimer=null;$("typing")?.remove(); }
+function removeTyping() { typingTimers.forEach(clearTimeout);typingTimers=[];$("typing")?.remove(); }
 function resizeInput() { input.style.height="auto";input.style.height=`${Math.min(Math.max(input.scrollHeight,35),180)}px`; }
 function togglePopover(el, open) {
   if(open){el.hidden=false;} else {el.hidden=true;}
@@ -789,7 +802,7 @@ async function runRequest(userContent) {
   const quotaBackup=readLocalQuota();
   recordClientSend();
   messages.push({role:"user",content:userContent});
-  addTyping();
+  addTyping(userContent);
   const started=performance.now();
   let responseData={};
   try {
@@ -982,45 +995,41 @@ updateWebMenu();
 resizeInput();
 updateQuota();
 updateKeyboardInset();
-/* ───────────── Popup "Tentang proyek" ───────────── */
-(function setupWelcome() {
-  const box=$("welcome");
-  if(!box)return;
-  const HIDE_KEY="zennnyx_welcome_hide_v1",SEEN_KEY="zennnyx_welcome_seen";
-  let lastFocus=null;
-  box.querySelectorAll("[data-favicon]").forEach(a=>a.prepend(faviconImg(a.dataset.favicon,"work-favicon")));
-  const open=(manual=false)=>{
-    lastFocus=document.activeElement;
-    box.hidden=false;document.body.style.overflow="hidden";
-    if(!manual){try{sessionStorage.setItem(SEEN_KEY,"1");}catch{}}
-    $("welcomeClose").focus({preventScroll:true});
-  };
-  const close=()=>{
-    if(box.hidden)return;
-    try{if($("welcomeOptOut").checked)localStorage.setItem(HIDE_KEY,"1");}catch{}
-    box.hidden=true;document.body.style.overflow="";
-    lastFocus?.focus?.({preventScroll:true});
-  };
-  $("welcomeClose").addEventListener("click",close);
-  box.addEventListener("click",e=>{if(e.target===box)close();});
-  document.addEventListener("keydown",e=>{
-    if(box.hidden)return;
-    if(e.key==="Escape")close();
-    if(e.key==="Tab"){ // fokus tetap di dalam dialog
-      const f=[...box.querySelectorAll("a[href],button,input")];
-      const first=f[0],last=f[f.length-1];
-      if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}
-      else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
-    }
-  });
-  $("aboutBtn")?.addEventListener("click",()=>{
-    closeSidebar();
-    open(true);
-  });
-  let hidden=false,seen=false;
-  try{hidden=localStorage.getItem(HIDE_KEY)==="1";seen=sessionStorage.getItem(SEEN_KEY)==="1";}catch{}
-  if(!hidden&&!seen)setTimeout(()=>open(false),500);
-})();
-
 loadModels();
 loadQuota();
+
+/* ───────────── Pop-up pengenalan project (muncul saat website dibuka) ───────────── */
+const INTRO_KEY="zennnyx_intro_hidden_v1";
+function setupIntro() {
+  const modal=$("introModal");
+  if(!modal)return;
+  try{if(localStorage.getItem(INTRO_KEY)==="1")return;}catch{}
+  const check=$("introDontShow"),closeBtn=$("introCloseBtn"),shell=document.querySelector(".app-shell");
+  const onKey=e=>{
+    if(e.key==="Escape"){e.preventDefault();e.stopPropagation();close();}
+    else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();e.stopPropagation();}
+    else if(e.key==="Tab"){
+      const items=[...modal.querySelectorAll("button,a[href],input")].filter(el=>!el.disabled);
+      if(!items.length)return;
+      const first=items[0],last=items[items.length-1];
+      if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}
+      else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
+      else if(!modal.contains(document.activeElement)){e.preventDefault();first.focus();}
+    }
+  };
+  function close(){
+    if(check?.checked){try{localStorage.setItem(INTRO_KEY,"1");}catch{}}
+    modal.hidden=true;
+    document.body.classList.remove("intro-open");
+    if(shell)shell.inert=false;
+    document.removeEventListener("keydown",onKey,true);
+    try{input.focus({preventScroll:true});}catch{}
+  }
+  modal.querySelectorAll("[data-intro-close]").forEach(el=>el.addEventListener("click",close));
+  modal.hidden=false;
+  document.body.classList.add("intro-open");
+  if(shell)shell.inert=true;
+  document.addEventListener("keydown",onKey,true);
+  closeBtn?.focus({preventScroll:true});
+}
+setupIntro();
