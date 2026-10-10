@@ -1,4 +1,4 @@
-/* ZennNyx AI — Markdown + LaTeX renderer (v9.2)
+/* ZennNyx AI — Markdown + LaTeX renderer (v9.7)
  *
  * Tidak menyentuh DOM, jadi gampang dites. Aturan penting:
  *   1. Rumus ( \( \) \[ \] $ $$ dan \begin{aligned}…) DIAMBIL DULU dan diganti penanda,
@@ -146,11 +146,17 @@ function renderInline(raw) {
   const hold = html => { tokens.push(html); return ZNX_TOK_L + (tokens.length - 1) + ZNX_TOK_R; };
   let s = String(raw);
   s = s.replace(/`([^`\n]+)`/g, (m, c) => hold(`<code class="inline-code">${escapeHtml(c)}</code>`));
-  s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (m, label, url) =>
+  // [teks](url) — url boleh memuat satu tingkat tanda kurung, mis. wikipedia.org/wiki/Nuts_(song)
+  s = s.replace(/\[([^\]\n]+)\]\(<?(https?:\/\/(?:[^\s()<>]|\([^\s()<>]*\))+)>?\)/g, (m, label, url) =>
     hold(`<a href="${escapeAttr(safeUrl(url))}" target="_blank" rel="noopener noreferrer">${renderEmphasis(escapeHtml(label))}</a>`));
-  s = s.replace(/(^|[\s(])(https?:\/\/[^\s<>-]+)/g, (m, pre, url) => {
-    const trail = (url.match(/[.,;:!?)\]]+$/) || [""])[0];
-    const clean = trail ? url.slice(0, -trail.length) : url;
+  // <https://...> (autolink gaya Markdown)
+  s = s.replace(/<(https?:\/\/[^\s<>]+)>/g, (m, url) =>
+    hold(`<a href="${escapeAttr(safeUrl(url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`));
+  // URL polos. Dulu karakter "-" ikut memutus URL, sehingga tautan seperti .../nuts-feat-rainy-bear/123 terpotong.
+  s = s.replace(/(^|[\s(>"“])(https?:\/\/[^\s<>"”]+)/g, (m, pre, url) => {
+    let clean = url.replace(/[.,;:!?\]]+$/, "");
+    while (clean.endsWith(")") && (clean.match(/\)/g) || []).length > (clean.match(/\(/g) || []).length) clean = clean.slice(0, -1);
+    const trail = url.slice(clean.length);
     return `${pre}${hold(`<a href="${escapeAttr(safeUrl(clean))}" target="_blank" rel="noopener noreferrer">${escapeHtml(clean)}</a>`)}${trail}`;
   });
   s = escapeHtml(s).replace(/&lt;br\s*\/?&gt;/gi, "<br>");
