@@ -203,7 +203,7 @@ const CURRENT_INTENT = /\b(beli|buy|terbaik|best|rekomendasi|recommended|spesifi
 const QUESTION = /\b(apa itu|apa arti|apakah|apa|siapa|kapan|di ?mana|dimana|berapa|mengapa|kenapa|bagaimana|gimana|jelaskan|jelasin|what|who|when|where|why|which|how)\b/i;
 
 // mode: "auto" (default) | "on" (selalu cari) | "off"
-function shouldSearchWeb(query, { mode = "auto", hasImage = false } = {}) {
+function shouldSearchWeb(query, { mode = "auto", hasImage = false, isFollowUp = false } = {}) {
   const q = String(query || "").toLowerCase().trim();
   if (!q || mode === "off") return false;
   if (CHITCHAT.test(q)) return false;
@@ -211,8 +211,12 @@ function shouldSearchWeb(query, { mode = "auto", hasImage = false } = {}) {
   if (EXPLICIT_SEARCH.test(q)) return true;
   if (hasImage) return false;
   if (OFFLINE_TASK.test(q)) return FRESH_SIGNAL.test(q);
-  if (FRESH_SIGNAL.test(q) || CURRENT_INTENT.test(q)) return true;
-  return QUESTION.test(q);
+  if (FRESH_SIGNAL.test(q)) return true;
+  // Lanjutan berupa CERITA/PENDAPAT (bukan pertanyaan) mis. "di Douyin aku liat ada orang juara terus dibelikan iQOO 15":
+  // kata seperti "hp"/"juara" tidak boleh memicu pencarian, karena hasil web yang melenceng malah mengacaukan jawaban.
+  const isQuestion = /\?/.test(q) || QUESTION.test(q);
+  if (isFollowUp && !isQuestion) return false;
+  return CURRENT_INTENT.test(q) || isQuestion;
 }
 
 function isIndonesianQuery(query) {
@@ -284,9 +288,47 @@ function formatSearchContext(sources) {
   return sources.map((s, i) => `[${i + 1}] ${s.title}\nURL: ${s.url}\nSnippet: ${s.snippet}`).join("\n\n");
 }
 
+/* ───────────── Kesinambungan percakapan antar model ───────────── */
+
+// Model bisa berganti di tengah percakapan (mode Otomatis / auto-switch), dan model kecil gampang menebak maksud pesan
+// lanjutan yang pendek lalu menjawab dengan skenario generik. Blok ini memberi SEMUA model pegangan yang sama:
+// topik awal, pesan user sebelumnya, ringkasan jawaban terakhir, dan aturan menanggapi detail spesifik user.
+function clip(text, n) {
+  const t = String(text || "").replace(/\s+/g, " ").trim();
+  return t.length > n ? t.slice(0, n - 1) + "…" : t;
+}
+
+function assistantText(message) {
+  return message?.role === "assistant" && typeof message.content === "string"
+    ? message.content.replace(/\n\n\[Sumber web dari jawaban sebelumnya[\s\S]*$/, "")
+    : "";
+}
+
+function buildContinuity(messages) {
+  const users = messages.filter(m => m.role === "user").map(userText).filter(Boolean);
+  if (users.length < 2) return { isFollowUp: false, prompt: "" };
+  const assistants = messages.map(assistantText).filter(Boolean);
+  const lastAssistant = assistants[assistants.length - 1] || "";
+  const current = users[users.length - 1];
+  const previous = users[users.length - 2];
+  const first = users[0];
+  const lines = [
+    "\n\nKESINAMBUNGAN PERCAKAPAN (penting):",
+    "Ini LANJUTAN percakapan yang sudah berjalan; jawaban sebelumnya mungkin ditulis oleh model AI lain. Kamu meneruskan percakapan yang SAMA, bukan memulai baru.",
+    `- Topik awal user: "${clip(first, 160)}"`
+  ];
+  if (previous !== first) lines.push(`- Pesan user sebelumnya: "${clip(previous, 160)}"`);
+  if (lastAssistant) lines.push(`- Inti jawaban terakhir (dari asisten): "${clip(lastAssistant, 280)}"`);
+  lines.push(
+    `- Pesan user sekarang: "${clip(current, 260)}"`,
+    "Aturan: (1) Anggap pesan sekarang sebagai respons langsung atas jawaban terakhir dan topik di atas, termasuk kalau berupa cerita, pendapat, atau pesan pendek tanpa tanda tanya. (2) Tanggapi detail SPESIFIK yang user sebut persis apa adanya (nama platform, tempat, nama orang, produk, angka). Jangan menggantinya dengan skenario generik yang tidak user sebut, misalnya \"teman atau saudara\" atau \"seseorang\". (3) Jangan mengubah sudut pandang: kalau user menceritakan apa yang ia LIHAT/DENGAR dari orang lain, tanggapi ceritanya itu, bukan berasumsi user sendiri yang mengalaminya. (4) Sambungkan ke topik awal, jangan mulai topik baru. (5) Kalau maksud pesan benar-benar ambigu, tafsirkan dengan wajar lalu tanggapi; jangan mengarang cerita."
+  );
+  return { isFollowUp: true, prompt: lines.join("\n") };
+}
+
 /* ───────────── Prompt ───────────── */
 
-function systemPrompt({ thinkHarder, currentDate, webSources, wantsWeb, wantsCode }) {
+function systemPrompt({ thinkHarder, currentDate, webSources, wantsWeb, wantsCode, continuity = "" }) {
   const tone = `Kamu adalah ZennNyx AI, asisten personal yang cerdas dan enak diajak ngobrol. Balas dengan bahasa yang dipakai user. Kalau user ngobrol dalam bahasa Indonesia, pakai bahasa Indonesia sehari-hari yang natural dan santai, lebih mirip teman ngobrol daripada customer service. Ikuti gaya "gue/lu" jika user memakai gaya itu; hindari "saya/Anda" dan bahasa kantor yang kaku kecuali user minta formal. Jangan memaksakan slang di setiap kalimat. Jaga jawaban tetap jelas, jujur, dan berguna. Tanggal saat ini di WIB: ${currentDate}. Gunakan Markdown dengan benar.
 
 MATEMATIKA: tulis rumus dengan LaTeX. Inline: \\( ... \\). Rumus blok: \\[ ... \\]. Beberapa langkah yang sejajar ditaruh dalam SATU blok: \\[ \\begin{aligned} x_1 &= ... \\\\ x_2 &= ... \\end{aligned} \\]. Jangan pernah menaruh format Markdown (** _ \`) di dalam rumus; pakai x_1 atau x_{1} untuk subskrip. Jangan pakai tanda $ untuk rumus (bentrok dengan tanda uang). Jangan menulis perintah LaTeX seperti \\times atau \\frac sebagai teks polos di luar delimiter.
@@ -297,7 +339,7 @@ Jangan mengarang sumber atau mengaku melakukan pencarian jika tidak ada hasil we
   const web = webSources.length
     ? `\n\nPENCARIAN WEB UNTUK PERTANYAAN TERAKHIR INI:\nGunakan sumber di bawah sebagai bukti untuk klaim faktual/aktual. Sumber ini hanya milik pertanyaan TERAKHIR, bukan seluruh percakapan. Jangan gunakan kembali sumber lama sebagai sumber pertanyaan baru. Beri penanda [1], [2], dst hanya untuk sumber yang tersedia di bawah. Bila tidak mendukung sebuah klaim, akui belum terverifikasi. Jika hasil pencarian tampak tidak berkaitan dengan topik percakapan sebelumnya (mis. judul atau nama yang berbeda), abaikan hasil itu, tetap lanjutkan topik yang sedang dibahas, dan katakan jujur bila infonya belum ditemukan.\n\n${formatSearchContext(webSources)}`
     : wantsWeb ? "\n\nUser membutuhkan fakta yang mungkin aktual, tetapi pencarian web tidak menghasilkan sumber. Jangan berpura-pura sudah mencari; jelaskan keterbatasan/ketidakpastian." : "";
-  return tone + coding + thinking + web;
+  return tone + continuity + coding + thinking + web;
 }
 
 function modelIdentity(model) {
@@ -610,10 +652,21 @@ function scoreModel(model, clientHealth) {
 }
 
 // Urutan percobaan: pilihan user (kalau bukan "auto") dulu, lalu semua model lain dari yang paling lancar.
-function buildChain(choice, available, hasImage, clientHealth) {
+// Model "lengket": di mode Otomatis, model yang menjawab giliran sebelumnya dipakai lagi selama masih sehat, supaya gaya,
+// pemahaman konteks, dan nada jawaban tidak berubah-ubah tiap pesan. Kalau baru gagal, ranking biasa yang menentukan.
+function isRecentlyFailing(model, clientHealth) {
+  const h = clientHealth[model.value] || serverHealth.get(model.value);
+  return Boolean(h && h.streak && Date.now() - (h.lastFailAt || 0) < HEALTH_WINDOW_MS);
+}
+
+function buildChain(choice, available, hasImage, clientHealth, stickyValue = "") {
   const usable = available.filter(m => !hasImage || m.vision);
   const ranked = [...usable].sort((a, b) => scoreModel(b, clientHealth) - scoreModel(a, clientHealth));
   const chain = [];
+  if (choice.provider === "auto" && stickyValue) {
+    const sticky = usable.find(m => m.value === stickyValue);
+    if (sticky && !isRecentlyFailing(sticky, clientHealth)) chain.push(sticky);
+  }
   if (choice.provider !== "auto") {
     const value = `${choice.provider}::${choice.model}`;
     const known = available.find(m => m.value === value) || { provider: choice.provider, id: choice.model, value, vision: false, prior: 50 };
@@ -708,7 +761,8 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Provider model tidak dikenal." });
   }
   const clientHealth = sanitizeClientHealth(body.health);
-  const chain = buildChain(choice, available, hasImage, clientHealth);
+  const stickyValue = typeof body.stickyModel === "string" && /^(groq|gemini|openrouter)::[\w.:/-]{1,140}$/.test(body.stickyModel) ? body.stickyModel : "";
+  const chain = buildChain(choice, available, hasImage, clientHealth, stickyValue);
   if (!chain.length) return res.status(400).json({ error: "Tidak ada model aktif yang bisa membaca gambar. Kirim tanpa gambar atau pasang API key Gemini/Groq." });
 
   // Jatah dipotong sebelum search/provider dipanggil, supaya request over-limit tidak memakai kredit API.
@@ -721,12 +775,13 @@ export default async function handler(req, res) {
   const prevHadWebsite = messages.some(m => m.role === "assistant" && typeof m.content === "string" && /```\s*html/i.test(m.content));
   const wantsCode = prevHadWebsite || /\b(buat|bikin|buatkan|buatin|build|create|website|web app|landing page|html|css|javascript|react|komponen|preview|pratinjau|aplikasi)\b/i.test(userQuery);
   const opts = { thinkHarder, wantsCode };
-  const wantsWeb = shouldSearchWeb(userQuery, { mode: searchMode, hasImage });
+  const continuity = buildContinuity(messages);
+  const wantsWeb = shouldSearchWeb(userQuery, { mode: searchMode, hasImage, isFollowUp: continuity.isFollowUp });
 
   try {
     const currentDate = currentDateJakarta();
     const webResult = wantsWeb ? await searchWeb(buildSearchQuery(messages)) : { used: false, sources: [] };
-    const promptFor = model => systemPrompt({ thinkHarder, currentDate, webSources: webResult.sources, wantsWeb, wantsCode }) + modelIdentity(model);
+    const promptFor = model => systemPrompt({ thinkHarder, currentDate, webSources: webResult.sources, wantsWeb, wantsCode, continuity: continuity.prompt }) + modelIdentity(model);
     const deadline = makeDeadline(startedAt);
 
     const { reply, model: used, attempts } = await runWithAutoSwitch(chain, messages, promptFor, opts, deadline);
