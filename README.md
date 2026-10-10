@@ -18,6 +18,15 @@ Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model p
 
 API keys stay on the server.
 
+## v9.8 — what changed (client only)
+- Indikator loading baru: glyph logo ZennNyx yang berputar (8 jari menyala bergantian), status yang berganti ("Berpikir…", "Mencari di web…", "Membaca sumber…", "Menyusun jawaban…") dan stopwatch detik. Tahapannya berbasis waktu karena server tidak mengirim progres; teks "Mencari di web…" hanya muncul kalau Web Search disetel *Selalu*.
+- Popup "Tentang proyek" saat masuk web (sekali per sesi; centang "Jangan tampilkan lagi" untuk mematikan permanen, tombol *Tentang* di footer sidebar membukanya lagi). Isi: proyek API gratisan, kreator @zennlonevyn (TikTok), karya lain clip.zone.id dan zenn-url.my.id. Kunci localStorage: `zennnyx_welcome_hide_v1`.
+
+## v9.7 — what changed (client only, `markdown.js` + `script.js`)
+- Tautan `<https://…>` (autolink Markdown) sekarang bisa diklik; sebelumnya tampil sebagai teks mentah.
+- URL polos tidak lagi terpotong di tanda hubung (`…/nuts-feat-rainy-bear/123`), dan URL bertanda kurung seperti `Nuts_(song)` utuh, baik di `[teks](url)` maupun polos.
+- Tautan yang teksnya berupa URL panjang ditampilkan sebagai tombol kecil: ikon situs + domain (alamat penuh di tooltip dan href).
+
 ## v9.6 — what changed (client only)
 - Tautan gaya referensi dari model ("[link Spotify][3]" + baris "[3]: https://…") kini diubah jadi tautan sungguhan, bukan teks mati dengan daftar URL di bawah. Tautan bertuliskan "link …"/"tautan …" tampil sebagai tombol kecil dengan ikon situs. "[link Spotify]" tanpa alamat dicocokkan ke sumber hasil pencarian berdasarkan nama situs.
 - Animasi mengetik: layar berhenti di pesan user dan tidak ikut turun; tinggi jawaban dikunci dulu supaya halaman tidak melompat.

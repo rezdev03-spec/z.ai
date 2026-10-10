@@ -507,12 +507,36 @@ function addErrorMessage(text, retry) {
   appendMessageElement(row);
   return row;
 }
+// Indikator "AI sedang bekerja": glyph logo ZennNyx yang berputar + status yang berganti + stopwatch.
+// Tahapannya berbasis waktu (server tidak mengirim progres), jadi teksnya sengaja tidak mengklaim hal yang belum pasti.
+let thinkingTimer=null;
+function thinkingSteps() {
+  if(webMode==="on")return [[0,"Mencari di web…"],[4,"Membaca sumber…"],[9,"Menyusun jawaban…"]];
+  if(thinkHarder)return [[0,"Berpikir lebih dalam…"],[5,"Menimbang beberapa sudut…"],[11,"Menyusun jawaban…"]];
+  return [[0,"Berpikir…"],[3,"Menyusun jawaban…"]];
+}
 function addTyping() {
+  clearInterval(thinkingTimer);
   const row=document.createElement("article");row.id="typing";row.className="message assistant";
-  row.innerHTML='<div class="answer typing"><span></span><span></span><span></span></div>';
+  const spokes=Array.from({length:8},(_,k)=>`<path class="tg-spoke" style="--k:${k}" d="M16 3.5v5" transform="rotate(${k*45} 16 16)"/>`).join("");
+  row.innerHTML=`<div class="answer thinking" role="status" aria-live="polite"><svg class="think-glyph" viewBox="0 0 32 32" aria-hidden="true">${spokes}<path class="tg-hex" d="m12 9.5 8 0 4.5 6.5-4.5 6.5h-8L7.5 16Z"/><circle class="tg-core" cx="16" cy="16" r="3.1"/></svg><span class="think-text"></span><span class="think-time"></span></div>`;
+  const textEl=row.querySelector(".think-text"),timeEl=row.querySelector(".think-time");
+  const steps=thinkingSteps();
+  const t0=Date.now();
+  let shown="";
+  const tick=()=>{
+    const sec=Math.floor((Date.now()-t0)/1000);
+    let label=steps.filter(([at])=>sec>=at).pop()[1];
+    if(sec>=30)label="Model lagi lambat, tetap ditunggu ya…";
+    else if(sec>=16)label="Masih bekerja, jawabannya agak panjang…";
+    if(label!==shown){shown=label;textEl.textContent=label;textEl.classList.remove("swap");void textEl.offsetWidth;textEl.classList.add("swap");}
+    timeEl.textContent=sec>=2?`${sec} dtk`:"";
+  };
+  tick();
+  thinkingTimer=setInterval(tick,500);
   appendMessageElement(row);
 }
-function removeTyping() { $("typing")?.remove(); }
+function removeTyping() { clearInterval(thinkingTimer);thinkingTimer=null;$("typing")?.remove(); }
 function resizeInput() { input.style.height="auto";input.style.height=`${Math.min(Math.max(input.scrollHeight,35),180)}px`; }
 function togglePopover(el, open) {
   if(open){el.hidden=false;} else {el.hidden=true;}
@@ -958,5 +982,45 @@ updateWebMenu();
 resizeInput();
 updateQuota();
 updateKeyboardInset();
+/* ───────────── Popup "Tentang proyek" ───────────── */
+(function setupWelcome() {
+  const box=$("welcome");
+  if(!box)return;
+  const HIDE_KEY="zennnyx_welcome_hide_v1",SEEN_KEY="zennnyx_welcome_seen";
+  let lastFocus=null;
+  box.querySelectorAll("[data-favicon]").forEach(a=>a.prepend(faviconImg(a.dataset.favicon,"work-favicon")));
+  const open=(manual=false)=>{
+    lastFocus=document.activeElement;
+    box.hidden=false;document.body.style.overflow="hidden";
+    if(!manual){try{sessionStorage.setItem(SEEN_KEY,"1");}catch{}}
+    $("welcomeClose").focus({preventScroll:true});
+  };
+  const close=()=>{
+    if(box.hidden)return;
+    try{if($("welcomeOptOut").checked)localStorage.setItem(HIDE_KEY,"1");}catch{}
+    box.hidden=true;document.body.style.overflow="";
+    lastFocus?.focus?.({preventScroll:true});
+  };
+  $("welcomeClose").addEventListener("click",close);
+  box.addEventListener("click",e=>{if(e.target===box)close();});
+  document.addEventListener("keydown",e=>{
+    if(box.hidden)return;
+    if(e.key==="Escape")close();
+    if(e.key==="Tab"){ // fokus tetap di dalam dialog
+      const f=[...box.querySelectorAll("a[href],button,input")];
+      const first=f[0],last=f[f.length-1];
+      if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}
+      else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
+    }
+  });
+  $("aboutBtn")?.addEventListener("click",()=>{
+    closeSidebar();
+    open(true);
+  });
+  let hidden=false,seen=false;
+  try{hidden=localStorage.getItem(HIDE_KEY)==="1";seen=sessionStorage.getItem(SEEN_KEY)==="1";}catch{}
+  if(!hidden&&!seen)setTimeout(()=>open(false),500);
+})();
+
 loadModels();
 loadQuota();
