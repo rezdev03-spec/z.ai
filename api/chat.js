@@ -176,13 +176,23 @@ function extractCurrentUserText(messages) {
   return "";
 }
 
-// Pertanyaan lanjutan pendek ("dan harganya?") butuh konteks pertanyaan sebelumnya supaya hasil pencarian relevan.
+// Pertanyaan lanjutan ("kira-kira lagunya kayak gimana sih") tidak menyebut topiknya, jadi kueri pencarian harus
+// membawa pertanyaan sebelumnya. Dulu hanya dilakukan kalau pesan < 32 huruf, sehingga kalimat lanjutan yang
+// agak panjang dicari tanpa konteks dan hasilnya melenceng ke topik lain.
+const ANAPHORA = /(nya\b|\b(itu|ini|tadi|tersebut|dia|mereka|lanjut|kira-kira|lagi|juga|selain|gimana|bagaimana)\b|\b(that|it|this|they|them|those)\b)/i;
+function isSelfContained(text) { return text.split(/\s+/).length >= 4 && !ANAPHORA.test(text); }
+
 function buildSearchQuery(messages) {
-  const users = messages.filter(m => m?.role === "user");
-  const current = userText(users[users.length - 1]);
-  const previous = userText(users[users.length - 2]);
-  const query = current.length < 32 && previous ? `${previous.slice(0, 140)} ${current}` : current;
-  return query.slice(0, 380);
+  const users = messages.filter(m => m?.role === "user").map(userText).filter(Boolean);
+  const current = users[users.length - 1] || "";
+  if (!current) return "";
+  if (users.length < 2 || isSelfContained(current)) return current.slice(0, 380);
+  const context = [];
+  for (let i = users.length - 2; i >= 0 && context.length < 2; i--) {
+    context.unshift(users[i].slice(0, 140));
+    if (isSelfContained(users[i])) break; // sudah cukup jelas topiknya
+  }
+  return `${context.join(" ")} ${current}`.slice(0, 380);
 }
 
 const EXPLICIT_SEARCH = /\b(cari(?:kan|in|\s?tau|\s?tahu)?|search|googling|google|browsing|telusuri|cek (?:di )?(?:web|internet|google)|(?:di|dari|lewat) (?:internet|web|google)|web search|kasih (?:sumber|link|referensi)|sertakan (?:sumber|link|referensi)|pakai sumber)\b/i;
@@ -285,7 +295,7 @@ Jangan mengarang sumber atau mengaku melakukan pencarian jika tidak ada hasil we
   const coding = wantsCode ? `\n\nMODE PEMBUATAN KODE: User mungkin meminta aplikasi atau website. Berikan kode yang lengkap dan benar-benar bisa dijalankan, bukan pseudo-code. Untuk website, utamakan SATU blok \`\`\`html berisi file HTML mandiri (CSS di <style>, JavaScript di <script>) karena hasilnya langsung ditampilkan sebagai pratinjau layar penuh. Jangan memecah jadi banyak file kecuali user memintanya. Kode HARUS lengkap sampai </html> dan tidak boleh terpotong: kalau fiturnya banyak, tulis ringkas dan efisien supaya muat. Wajib responsive (mobile dulu) dengan <meta name="viewport">, tidak bergantung pada file lokal; CDN publik boleh bila perlu. Jangan menulis placeholder untuk bagian inti. Jika user hanya bertanya atau ngobrol (bukan meminta perubahan kode), jawab biasa tanpa menulis ulang seluruh kode. Penjelasan setelah kode cukup singkat.` : "";
   const thinking = thinkHarder ? `\n\nMODE THINK HARDER: Analisis kebutuhan dengan cermat dan jawab lebih mendalam serta terstruktur, tetapi tetap gunakan gaya bahasa santai yang sesuai user. Jangan bertele-tele tanpa manfaat.` : "";
   const web = webSources.length
-    ? `\n\nPENCARIAN WEB UNTUK PERTANYAAN TERAKHIR INI:\nGunakan sumber di bawah sebagai bukti untuk klaim faktual/aktual. Sumber ini hanya milik pertanyaan TERAKHIR, bukan seluruh percakapan. Jangan gunakan kembali sumber lama sebagai sumber pertanyaan baru. Beri penanda [1], [2], dst hanya untuk sumber yang tersedia di bawah. Bila tidak mendukung sebuah klaim, akui belum terverifikasi.\n\n${formatSearchContext(webSources)}`
+    ? `\n\nPENCARIAN WEB UNTUK PERTANYAAN TERAKHIR INI:\nGunakan sumber di bawah sebagai bukti untuk klaim faktual/aktual. Sumber ini hanya milik pertanyaan TERAKHIR, bukan seluruh percakapan. Jangan gunakan kembali sumber lama sebagai sumber pertanyaan baru. Beri penanda [1], [2], dst hanya untuk sumber yang tersedia di bawah. Bila tidak mendukung sebuah klaim, akui belum terverifikasi. Jika hasil pencarian tampak tidak berkaitan dengan topik percakapan sebelumnya (mis. judul atau nama yang berbeda), abaikan hasil itu, tetap lanjutkan topik yang sedang dibahas, dan katakan jujur bila infonya belum ditemukan.\n\n${formatSearchContext(webSources)}`
     : wantsWeb ? "\n\nUser membutuhkan fakta yang mungkin aktual, tetapi pencarian web tidak menghasilkan sumber. Jangan berpura-pura sudah mencari; jelaskan keterbatasan/ketidakpastian." : "";
   return tone + coding + thinking + web;
 }
