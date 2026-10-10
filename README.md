@@ -18,6 +18,20 @@ Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model p
 
 API keys stay on the server.
 
+## v9.6 — what changed (client only)
+- Tautan gaya referensi dari model ("[link Spotify][3]" + baris "[3]: https://…") kini diubah jadi tautan sungguhan, bukan teks mati dengan daftar URL di bawah. Tautan bertuliskan "link …"/"tautan …" tampil sebagai tombol kecil dengan ikon situs. "[link Spotify]" tanpa alamat dicocokkan ke sumber hasil pencarian berdasarkan nama situs.
+- Animasi mengetik: layar berhenti di pesan user dan tidak ikut turun; tinggi jawaban dikunci dulu supaya halaman tidak melompat.
+
+## v9.5 — what changed
+- Sitasi bawaan GPT-OSS `【1†L1-L2】` selalu dibuang dari tampilan.
+- Web search untuk pertanyaan lanjutan: kueri kini membawa pertanyaan sebelumnya kapan pun pesan baru tidak berdiri sendiri (ada kata seperti "-nya", "itu", "tadi", "kira-kira" atau terlalu pendek), bukan hanya kalau < 32 huruf. Prompt juga menyuruh model mengabaikan hasil yang tidak nyambung dengan topik.
+
+## v9.4 — what changed (client only, API untouched)
+- Penanda sitasi `[1][2]` dan baris "Referensi: …" disembunyikan dari jawaban yang memakai web search (kode tidak disentuh); sumber hanya lewat tombol Sources.
+- Placeholder kotak ketik lebih pendek/kecil, satu baris.
+- Tombol ikon *Chat baru* di kanan atas.
+- Jawaban baru muncul dengan animasi mengetik (ketuk jawaban untuk langsung menampilkan semuanya; mati otomatis bila perangkat memakai "reduce motion").
+
 ## v9.3 — what changed
 - **Sources**: tombol *Sources* sekarang membuka daftar tautan. Penyebabnya bug klik: popover dibuat lalu langsung dihapus handler klik dokumen. Tiap sumber kini punya ikon situs (favicon) + judul + domain; tombolnya menampilkan tumpukan favicon.
 - **Model otomatis**: default baru = *Otomatis*. Server memilih model dari semua provider berdasarkan kelancaran (gagal baru-baru ini = turun, lambat = turun, sering sukses = naik). Nilai awal ada di `lib/models.js` (`prior`). Catatan kelancaran disimpan di browser (`zennnyx_model_health_v1`) dan dikirim ke server.

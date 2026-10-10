@@ -284,12 +284,44 @@ function stripToolCitations(text) {
     .replace(/[ \t]*(?:【[^】\n]{1,40}】)+[ \t]*(?=[.,;:!?)])/g,"")
     .replace(/[ \t]*(?:【[^】\n]{1,40}】)+/g,"");
 }
-function stripCitations(text) {
+// Model sering menulis tautan gaya referensi: "[link Spotify][3]" + baris "[3]: https://...". Renderer kita tidak
+// mengenalnya, dan menghapus "[3]" membuat teksnya jadi mati. Ubah jadi tautan biasa dulu sebelum sitasi dibuang.
+function resolveReferenceLinks(text,sources=[]) {
+  const defs=new Map();
+  let out=String(text).replace(/^[ \t]*\[([^\]\n]{1,60})\]:[ \t]*<?(https?:\/\/[^\s>]+)>?(?:[ \t]+["(][^\n]*)?[ \t]*$/gim,(m,label,url)=>{defs.set(label.trim().toLowerCase(),url);return "";});
+  if(defs.size){
+    out=out.replace(/\[([^\]\n]{1,80})\]\[([^\]\n]{0,60})\]/g,(m,t,label)=>{if(/^\d{1,2}$/.test(t.trim()))return m; // "[2][3]" = dua sitasi berurutan, bukan tautan
+      const url=defs.get((label||t).trim().toLowerCase());return url?`[${t}](${url})`:m;});
+    out=out.replace(/\[([^\]\n]{1,60})\](?![(\[:])/g,(m,label)=>{
+      if(/^\d{1,2}$/.test(label))return m; // [1] = sitasi, dibuang di langkah berikutnya
+      const url=defs.get(label.trim().toLowerCase());return url?`[${label}](${url})`:m;
+    });
+  }
+  // "[link Spotify]" tanpa alamat apa pun: cocokkan nama situs ke daftar sumber hasil pencarian.
+  if(sources.length)out=out.replace(/\[((?:link|tautan|buka|lihat)[^\]\n]{0,40})\](?![(\[:])/gi,(m,label)=>{
+    const low=label.toLowerCase();
+    const hit=sources.find(src=>(src.domain||domainOf(src.url)).split(".").some(part=>part.length>3&&low.includes(part)));
+    return hit?`[${label}](${hit.url})`:m;
+  });
+  return out;
+}
+function stripCitations(text,sources=[]) {
+  text=resolveReferenceLinks(text,sources).replace(/^[ \t]*:[ \t]*https?:\/\/\S+[ \t]*$/gm,""); // sisa daftar referensi yatim
   const parts=String(text).split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g); // kode tidak disentuh
   let out=parts.map((part,i)=>i%2?part:part.replace(/[ \t]*(?<![\w\\)])\[\d{1,2}(?:\s*[,–-]\s*\d{1,2})*\](?!\()/g,"")).join("");
   // Baris penutup seperti "Referensi: [1] Nama Situs" tidak perlu lagi: sumbernya sudah ada di tombol Sources.
   out=out.replace(/^[ \t]*[*_]*(?:Referensi|Sumber|Sources?|References?)[*_]*[ \t]*:[^\n]{0,200}$/gim,"");
   return out.replace(/[ \t]+([.,;:!?])/g,"$1").replace(/\n{3,}/g,"\n\n").trim();
+}
+
+// Tautan bertuliskan "link …"/"tautan …" ditampilkan sebagai tombol kecil dengan ikon situsnya.
+function pillifyLinks(root) {
+  root.querySelectorAll(".markdown a[href]").forEach(a=>{
+    if(!/^\s*(link|tautan|buka|lihat|open)\b/i.test(a.textContent))return;
+    const domain=domainOf(a.href);
+    a.classList.add("link-pill");
+    if(domain)a.prepend(faviconImg(domain,"pill-favicon"));
+  });
 }
 
 /* ───────────── Animasi mengetik ───────────── */
@@ -316,16 +348,24 @@ function typeReveal(body,row) {
     else{units.push({el:n,len:6});total+=6;}
   }
   if(total<40)return;
+  // Kunci tinggi akhir jawaban dulu: halaman tidak "tumbuh" saat diketik, dan layar bisa diam di pesan user.
+  row.style.minHeight=`${row.offsetHeight}px`;
   for(const u of units){if(u.node)u.node.nodeValue="";else u.el.style.visibility="hidden";}
   row.classList.add("typing-active");
+  const userRow=row.previousElementSibling;
+  if(userRow?.classList.contains("user")){
+    const bar=document.querySelector(".topbar")?.offsetHeight||0;
+    window.scrollTo({top:Math.max(0,userRow.getBoundingClientRect().top+window.scrollY-bar-12),behavior:"instant"});
+  }
   const seconds=Math.min(7,Math.max(1.4,total/110));
   const cps=total/seconds;
   const t0=performance.now();
-  let idx=0,consumed=0,finished=false,lastScroll=0;
+  let idx=0,consumed=0,finished=false;
   const finish=()=>{
     if(finished)return;finished=true;
     for(const u of units){if(u.node)u.node.nodeValue=u.text;else u.el.style.visibility="";}
     row.classList.remove("typing-active");
+    row.style.minHeight="";
     row.removeEventListener("click",finish);
   };
   row.addEventListener("click",finish); // ketuk jawaban = langsung tampilkan semuanya
@@ -342,7 +382,6 @@ function typeReveal(body,row) {
         break;
       }
     }
-    if(now-lastScroll>120&&nearBottom()){lastScroll=now;window.scrollTo({top:document.documentElement.scrollHeight});}
     if(idx>=units.length)finish();else requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
@@ -425,13 +464,14 @@ function addAssistantActions(row, content, elapsedMs, usedThink, sources=[], web
 function addMessage(role, content, options={}) {
   const {elapsedMs=0,usedThink=false,imageData=null,sources=[],webSearched=false,notes=[],modelLabel="",animate=false}=options;
   if(role==="assistant")content=stripToolCitations(content);
-  if(role==="assistant"&&(webSearched||(Array.isArray(sources)&&sources.length)))content=stripCitations(content);
+  if(role==="assistant"&&(webSearched||(Array.isArray(sources)&&sources.length)))content=stripCitations(content,Array.isArray(sources)?sources:[]);
   const row=document.createElement("article");
   row.className=`message ${role}`;
   row.style.animation="rise-in .22s ease both";
   const body=document.createElement("div");body.className=role==="assistant"?"answer":"bubble";
   if(role==="assistant") {
     body.innerHTML=renderMarkdown(content);
+    if(role==="assistant")pillifyLinks(body);
   } else {
     body.textContent=content;
     body.style.whiteSpace="pre-wrap";

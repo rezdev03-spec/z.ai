@@ -451,3 +451,10 @@ textarea::placeholder { font-size: 14px; white-space: nowrap; overflow: hidden; 
 
 /* Selama jawaban "diketik", tombol aksi menunggu */
 .typing-active .assistant-actions, .typing-active .answer-disclaimer { visibility: hidden; }
+
+/* ───────────── v9.6 ───────────── */
+.markdown a.link-pill { display: inline-flex; align-items: center; gap: 7px; margin: 2px 2px; padding: 3px 12px 3px 6px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface-2); color: var(--text); font-size: .86em; font-weight: 600; line-height: 1.5; text-decoration: none; vertical-align: baseline; }
+.markdown a.link-pill:hover { background: var(--surface); border-color: var(--text); }
+.pill-favicon { width: 18px; height: 18px; border-radius: 50%; object-fit: contain; background: var(--surface); }
+.pill-favicon.fallback { display: inline-grid; place-items: center; color: var(--muted); }
+.pill-favicon.fallback svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 2; }
