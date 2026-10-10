@@ -278,6 +278,12 @@ function toggleFullscreen() {
 /* ───────────── Pesan ───────────── */
 
 /* ───────────── Sitasi [1][2] disembunyikan; sumber hanya di tombol Sources ───────────── */
+// Format sitasi bawaan GPT-OSS: 【1†L1-L2】. Tidak pernah berguna bagi pembaca, jadi selalu dibuang.
+function stripToolCitations(text) {
+  return String(text)
+    .replace(/[ \t]*(?:【[^】\n]{1,40}】)+[ \t]*(?=[.,;:!?)])/g,"")
+    .replace(/[ \t]*(?:【[^】\n]{1,40}】)+/g,"");
+}
 function stripCitations(text) {
   const parts=String(text).split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g); // kode tidak disentuh
   let out=parts.map((part,i)=>i%2?part:part.replace(/[ \t]*(?<![\w\\)])\[\d{1,2}(?:\s*[,–-]\s*\d{1,2})*\](?!\()/g,"")).join("");
@@ -418,6 +424,7 @@ function addAssistantActions(row, content, elapsedMs, usedThink, sources=[], web
 
 function addMessage(role, content, options={}) {
   const {elapsedMs=0,usedThink=false,imageData=null,sources=[],webSearched=false,notes=[],modelLabel="",animate=false}=options;
+  if(role==="assistant")content=stripToolCitations(content);
   if(role==="assistant"&&(webSearched||(Array.isArray(sources)&&sources.length)))content=stripCitations(content);
   const row=document.createElement("article");
   row.className=`message ${role}`;
