@@ -525,11 +525,17 @@ const tokenBudget = {
   openrouter: o => (o.wantsCode ? 6144 : o.thinkHarder ? 5000 : 4096)
 };
 
+// Key yang ditempel dari HP sering membawa spasi/baris baru/tanda kutip/awalan "Bearer": header jadi tidak valid
+// dan request gagal sebelum sampai ke provider. Bersihkan dulu.
+function cleanKey(value) {
+  return String(value || "").trim().replace(/^["']+|["']+$/g, "").replace(/^Bearer\s+/i, "").trim();
+}
+
 // Provider OpenAI-compatible (Mistral, NVIDIA NIM, ...): konfigurasinya ada di COMPAT_PROVIDERS (lib/models.js).
 async function callCompat(provider, model, messages, prompt, opts, deadline) {
   const cfg = COMPAT_PROVIDERS[provider];
   const { response, data } = await postJson(cfg.label, `${cfg.baseUrl}/chat/completions`,
-    { Authorization: `Bearer ${process.env[cfg.env]}` },
+    { Authorization: `Bearer ${cleanKey(process.env[cfg.env])}` },
     {
       model,
       messages: [{ role: "system", content: prompt }, ...messages],
@@ -722,7 +728,7 @@ async function runWithAutoSwitch(chain, messages, promptFor, opts, deadline) {
       const ms = Date.now() - t0;
       recordHealth(model.value, true, ms);
       attempts.push({ value: model.value, ok: true, ms });
-      return { reply, model, attempts };
+      return { reply, model, attempts, firstError };
     } catch (raw) {
       const error = raw instanceof UpstreamError ? raw : new UpstreamError("Kesalahan tak terduga saat memanggil model.", { status: 500 });
       if (!(raw instanceof UpstreamError)) console.error("model call crashed:", model.value, raw);
@@ -811,7 +817,7 @@ export default async function handler(req, res) {
     const promptFor = model => systemPrompt({ thinkHarder, currentDate, webSources: webResult.sources, wantsWeb, wantsCode, continuity: continuity.prompt }) + modelIdentity(model);
     const deadline = makeDeadline(startedAt);
 
-    const { reply, model: used, attempts } = await runWithAutoSwitch(chain, messages, promptFor, opts, deadline);
+    const { reply, model: used, attempts, firstError } = await runWithAutoSwitch(chain, messages, promptFor, opts, deadline);
     const failedFirst = attempts[0] && !attempts[0].ok ? chain.find(m => m.value === attempts[0].value) : null;
 
     return res.status(200).json({
@@ -819,6 +825,7 @@ export default async function handler(req, res) {
       provider: used.provider,
       model: used.id,
       fallbackFrom: failedFirst ? failedFirst.id : undefined,
+      fallbackReason: failedFirst && firstError ? String(firstError.message || "").slice(0, 300) : undefined,
       attempts,
       thinkHarder,
       hasImage,
