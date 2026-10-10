@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { getFreeChatModels, isFreeId, isNonChatModel } from "../lib/openrouter.js";
-import { GROQ_MODELS, GEMINI_MODELS, listAvailableModels } from "../lib/models.js";
+import { GROQ_MODELS, GEMINI_MODELS, COMPAT_PROVIDERS, getCompatModels, listAvailableModels } from "../lib/models.js";
 
 const DAILY_LIMIT = 20;
 const COOLDOWN_MS = 5000;
@@ -519,10 +519,32 @@ function makeDeadline(startedAt, total = TOTAL_BUDGET_MS) {
 /* ───────────── Provider ───────────── */
 
 const tokenBudget = {
+  compat: o => (o.wantsCode ? 8192 : o.thinkHarder ? 6144 : 4096),
   groq: o => (o.wantsCode ? 8192 : o.thinkHarder ? 6144 : 4096),
   gemini: o => (o.wantsCode ? 16384 : o.thinkHarder ? 8192 : 4096),
   openrouter: o => (o.wantsCode ? 6144 : o.thinkHarder ? 5000 : 4096)
 };
+
+// Provider OpenAI-compatible (Mistral, NVIDIA NIM, ...): konfigurasinya ada di COMPAT_PROVIDERS (lib/models.js).
+async function callCompat(provider, model, messages, prompt, opts, deadline) {
+  const cfg = COMPAT_PROVIDERS[provider];
+  const { response, data } = await postJson(cfg.label, `${cfg.baseUrl}/chat/completions`,
+    { Authorization: `Bearer ${process.env[cfg.env]}` },
+    {
+      model,
+      messages: [{ role: "system", content: prompt }, ...messages],
+      max_tokens: tokenBudget.compat(opts),
+      temperature: opts.thinkHarder ? 0.55 : 0.7
+    },
+    deadline.timeout(opts.attemptCap));
+  if (!response.ok) { console.error(`${cfg.label} error:`, model, response.status, upstreamMessage(data)); throw upstreamFail(cfg.label, response.status, data); }
+  const reply = stripThinking(textFromOpenAIResponse(data));
+  if (!reply) {
+    const why = data?.choices?.[0]?.finish_reason === "length" ? " (token habis dipakai untuk berpikir)" : "";
+    throw new UpstreamError(`${cfg.label}: model mengembalikan jawaban kosong${why}. Coba kirim ulang.`, { status: 502 });
+  }
+  return reply;
+}
 
 async function callGroq(model, messages, prompt, opts, deadline) {
   const { response, data } = await postJson("Groq", "https://api.groq.com/openai/v1/chat/completions",
@@ -625,7 +647,7 @@ function sanitizeClientHealth(raw) {
   const out = {};
   if (!raw || typeof raw !== "object") return out;
   for (const [key, v] of Object.entries(raw).slice(0, 60)) {
-    if (!/^(groq|gemini|openrouter)::[\w.:/-]{1,140}$/.test(key) || !v || typeof v !== "object") continue;
+    if (!/^(groq|gemini|openrouter|mistral|nvidia)::[\w.:/-]{1,140}$/.test(key) || !v || typeof v !== "object") continue;
     out[key] = { streak: num(v.streak, 0, 10), lastFailAt: num(v.lastFailAt, 0, Date.now()), ms: num(v.ms, 0, 60000), ok: num(v.ok, 0, 1000) };
   }
   return out;
@@ -677,6 +699,7 @@ function buildChain(choice, available, hasImage, clientHealth, stickyValue = "")
 }
 
 function callCandidate(model, messages, promptFor, opts, deadline) {
+  if (COMPAT_PROVIDERS[model.provider]) return callCompat(model.provider, model.id, messages, promptFor(model.id), opts, deadline);
   if (model.provider === "groq") return callGroq(model.id, messages, promptFor(model.id), opts, deadline);
   if (model.provider === "gemini") return callGemini(model.id, messages, promptFor(model.id), opts, deadline);
   return callOpenRouterModel(model.id, messages, promptFor, opts, deadline);
@@ -727,6 +750,8 @@ export default async function handler(req, res) {
     return res.status(200).json({
       quota: quotaSummary(quota),
       providers: {
+        mistral: Boolean(process.env.MISTRAL_API_KEY),
+        nvidia: Boolean(process.env.NVIDIA_API_KEY),
         groq: Boolean(process.env.GROQ_API_KEY),
         gemini: Boolean(process.env.GEMINI_API_KEY),
         openrouter: Boolean(process.env.OPENROUTER_API_KEY),
@@ -746,10 +771,12 @@ export default async function handler(req, res) {
 
   const hasImage = messages.some(m => Array.isArray(m.content) && m.content.some(p => p?.type === "image_url"));
   const available = await listAvailableModels();
-  if (!available.length) return res.status(503).json({ error: "Belum ada API key model yang dipasang di Vercel (GROQ_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY)." });
+  if (!available.length) return res.status(503).json({ error: "Belum ada API key model yang dipasang di Vercel (GROQ_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY / MISTRAL_API_KEY / NVIDIA_API_KEY)." });
   const chosenModel = choice.model;
   if (choice.provider === "auto") {
     // Server memilih sendiri model paling lancar.
+  } else if (COMPAT_PROVIDERS[choice.provider]) {
+    if (!getCompatModels(choice.provider).some(m => m.id === chosenModel)) return res.status(400).json({ error: `Model ${COMPAT_PROVIDERS[choice.provider].label} tidak ada di daftar (cek env ${COMPAT_PROVIDERS[choice.provider].modelsEnv}).` });
   } else if (choice.provider === "groq") {
     if (!GROQ_ALLOWED.has(chosenModel)) return res.status(400).json({ error: "Model Groq tidak diizinkan." });
   } else if (choice.provider === "gemini") {
@@ -761,7 +788,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Provider model tidak dikenal." });
   }
   const clientHealth = sanitizeClientHealth(body.health);
-  const stickyValue = typeof body.stickyModel === "string" && /^(groq|gemini|openrouter)::[\w.:/-]{1,140}$/.test(body.stickyModel) ? body.stickyModel : "";
+  const stickyValue = typeof body.stickyModel === "string" && /^(groq|gemini|openrouter|mistral|nvidia)::[\w.:/-]{1,140}$/.test(body.stickyModel) ? body.stickyModel : "";
   const chain = buildChain(choice, available, hasImage, clientHealth, stickyValue);
   if (!chain.length) return res.status(400).json({ error: "Tidak ada model aktif yang bisa membaca gambar. Kirim tanpa gambar atau pasang API key Gemini/Groq." });
 
