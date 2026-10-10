@@ -36,6 +36,7 @@ let recognition = null;
 let recording = false;
 let activeProject = null;
 const AUTO_MODEL = { id: "auto", value: "auto::auto", provider: "auto", name: "Otomatis", description: "Pilih model terlancar, ganti sendiri kalau error", vision: true };
+let lastUsedModel = ""; // model yang menjawab giliran terakhir di chat ini; dikirim ke server agar mode Otomatis tidak gonta-ganti model
 let activeModel = AUTO_MODEL.value; // default: server memilih model paling lancar saat ini
 let serverQuota = null;
 let modelChoices = [];
@@ -810,7 +811,7 @@ async function runRequest(userContent) {
       method:"POST",
       headers:{"Content-Type":"application/json"},
       credentials:"same-origin",
-      body:JSON.stringify({messages:prepareHistoryForRequest(),thinkHarder,modelChoice:activeModel,webSearch:webMode,health:readHealth()})
+      body:JSON.stringify({messages:prepareHistoryForRequest(),thinkHarder,modelChoice:activeModel,stickyModel:activeModel===AUTO_MODEL.value?lastUsedModel:"",webSearch:webMode,health:readHealth()})
     });
     responseData=await response.json().catch(()=>({}));
     if(responseData.quota)updateQuota(responseData.quota);
@@ -831,6 +832,7 @@ async function runRequest(userContent) {
     const modelLabel=responseData.model?nameOf(responseData.model):"";
     addMessage("assistant",reply,{elapsedMs:elapsed,usedThink:Boolean(responseData.thinkHarder),sources,webSearched:Boolean(responseData.webSearched),notes,modelLabel,animate:true});
     messages.push({role:"assistant",content:reply,sources});
+    if(responseData.provider&&responseData.model)lastUsedModel=`${responseData.provider}::${responseData.model}`;
     if(messages.length>16)messages=messages.slice(-16);
     const project=extractProjectFiles(reply);
     if(project){
@@ -864,7 +866,7 @@ async function runRequest(userContent) {
 function closeKeyboard() {input.blur();}
 function resetToNewChat() {
   if(busy){showToast("Tunggu respons selesai dulu.");return;}
-  messages=[];clearImage();input.value="";resizeInput();thinkHarder=false;updateThinkMenu();
+  messages=[];lastUsedModel="";clearImage();input.value="";resizeInput();thinkHarder=false;updateThinkMenu();
   togglePopover(attachPopover,false);togglePopover(modelPickerPopover,false);modelPickerBtn.setAttribute("aria-expanded","false");document.querySelectorAll(".sources-popover").forEach(el=>el.remove());
   chat.replaceChildren();
   const template=$("welcomeTemplate");
