@@ -466,6 +466,7 @@ function upstreamFail(label, status, data) {
   let message, httpStatus = 502, fatal = false, globalLimit = false;
   if (status === 401 || status === 403) { message = `${label}: API key ditolak atau tidak punya akses ke model ini.`; fatal = true; }
   else if (status === 402) { message = `${label}: kredit/saldo tidak cukup untuk model ini.`; fatal = true; }
+  else if (status === 410) message = `${label}: model ini sudah dihentikan provider (end of life). Ganti daftar modelnya lewat env ${label.toUpperCase()}_MODELS di Vercel.`;
   else if (status === 404) message = `${label}: model tidak ditemukan atau sedang tidak punya endpoint aktif.`;
   else if (status === 408 || status === 504) { message = `${label}: respons terlalu lama.`; httpStatus = 504; }
   else if (status === 429) {
@@ -519,7 +520,7 @@ function makeDeadline(startedAt, total = TOTAL_BUDGET_MS) {
 /* ───────────── Provider ───────────── */
 
 const tokenBudget = {
-  compat: o => (o.wantsCode ? 8192 : o.thinkHarder ? 6144 : 4096),
+  compat: (o, reasoning) => reasoning ? (o.wantsCode ? 12288 : o.thinkHarder ? 8192 : 6144) : (o.wantsCode ? 8192 : o.thinkHarder ? 6144 : 4096),
   groq: o => (o.wantsCode ? 8192 : o.thinkHarder ? 6144 : 4096),
   gemini: o => (o.wantsCode ? 16384 : o.thinkHarder ? 8192 : 4096),
   openrouter: o => (o.wantsCode ? 6144 : o.thinkHarder ? 5000 : 4096)
@@ -532,14 +533,15 @@ function cleanKey(value) {
 }
 
 // Provider OpenAI-compatible (Mistral, NVIDIA NIM, ...): konfigurasinya ada di COMPAT_PROVIDERS (lib/models.js).
-async function callCompat(provider, model, messages, prompt, opts, deadline) {
+async function callCompat(candidate, messages, prompt, opts, deadline) {
+  const { provider, id: model } = candidate;
   const cfg = COMPAT_PROVIDERS[provider];
   const { response, data } = await postJson(cfg.label, `${cfg.baseUrl}/chat/completions`,
     { Authorization: `Bearer ${cleanKey(process.env[cfg.env])}` },
     {
       model,
       messages: [{ role: "system", content: prompt }, ...messages],
-      max_tokens: tokenBudget.compat(opts),
+      max_tokens: tokenBudget.compat(opts, candidate.reasoning),
       temperature: opts.thinkHarder ? 0.55 : 0.7
     },
     deadline.timeout(opts.attemptCap));
@@ -705,7 +707,7 @@ function buildChain(choice, available, hasImage, clientHealth, stickyValue = "")
 }
 
 function callCandidate(model, messages, promptFor, opts, deadline) {
-  if (COMPAT_PROVIDERS[model.provider]) return callCompat(model.provider, model.id, messages, promptFor(model.id), opts, deadline);
+  if (COMPAT_PROVIDERS[model.provider]) return callCompat(model, messages, promptFor(model.id), opts, deadline);
   if (model.provider === "groq") return callGroq(model.id, messages, promptFor(model.id), opts, deadline);
   if (model.provider === "gemini") return callGemini(model.id, messages, promptFor(model.id), opts, deadline);
   return callOpenRouterModel(model.id, messages, promptFor, opts, deadline);
@@ -722,6 +724,7 @@ async function runWithAutoSwitch(chain, messages, promptFor, opts, deadline) {
     if (attempts.length && deadline.left() < 7000) break;
     const n = attempts.length;
     opts.attemptCap = opts.wantsCode ? [44000, 22000, 18000, 18000][n] : [20000, 14000, 12000, 12000][n];
+    if (model.slow) opts.attemptCap = Math.max(opts.attemptCap, 32000); // model reasoning besar: beri waktu lebih sebelum dianggap gagal
     const t0 = Date.now();
     try {
       const reply = await callCandidate(model, messages, promptFor, opts, deadline);
