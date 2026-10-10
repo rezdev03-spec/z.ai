@@ -1,4 +1,4 @@
-# ZennNyx AI v9.12 — Workspace
+# ZennNyx AI v9.14 — Workspace
 
 Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model picker, full-screen website preview, KaTeX math, real web sources, and a 20-message daily quota (WIB).
 
@@ -20,6 +20,15 @@ Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model p
 - `PUBLIC_APP_URL` (optional; OpenRouter attribution)
 
 API keys stay on the server.
+
+## v9.14 — what changed (`lib/models.js`, `api/chat.js`)
+- Model NVIDIA default diganti ke model yang BEDA dari Groq: **DeepSeek V4.1 Flash** (`deepseek-ai/deepseek-v4.1-flash`, bisa baca gambar), **GLM-5.3** (`z-ai/glm-5.3`), dan **GLM-5.3 Flash** (`z-ai/glm-5.3-flash`, bisa baca gambar). Id-nya dicocokkan dengan halaman build.nvidia.com.
+- Model-model ini "berpikir" dulu sebelum menjawab, jadi diberi batas token lebih besar dan batas waktu tunggu lebih lama (32 dtk sebelum dianggap gagal). Kalau tetap kosong/terlalu lama, auto-switch ke model lain dan alasannya tampil di catatan merah.
+- Di mode Otomatis, model NVIDIA hanya cadangan (nilai awal di bawah Groq/Gemini). Untuk memakainya, pilih manual di picker.
+
+## v9.13 — what changed (`lib/models.js`, `api/chat.js`)
+- NVIDIA: HTTP 410 = model sudah dihentikan (end of life). Nemotron Super 49B dan beberapa Llama/Nemotron lama sudah mati, jadi daftar default diganti ke `openai/gpt-oss-120b` dan `openai/gpt-oss-20b`. Pesan 410 sekarang menjelaskan itu. Katalog NVIDIA sering berganti; ganti lewat env `NVIDIA_MODELS` bila perlu, tanpa edit kode.
+- Mistral: paket gratis API sudah tidak tersedia. Jangan pasang `MISTRAL_API_KEY` kalau tidak berbayar; tanpa key, providernya tidak muncul.
 
 ## v9.12 — what changed (`api/chat.js`, `script.js`)
 - Catatan "X sedang bermasalah, jadi dijawab otomatis oleh Y" sekarang diikuti **Penyebab:** (mis. "API key ditolak", "limit tercapai", "model tidak ditemukan"), diambil dari error asli provider.
