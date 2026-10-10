@@ -438,3 +438,16 @@ textarea { font-size: 16px; line-height: 1.45; padding: 9px 6px; min-height: 38p
 .stack-favicon:first-child { margin-left: 0; }
 .stack-favicon.fallback { display: inline-grid; place-items: center; }
 .stack-favicon.fallback svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2; }
+
+/* ───────────── v9.4 ───────────── */
+.topbar-actions { display: flex !important; margin-left: auto; align-items: center; }
+.icon-round-btn { display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid var(--border); border-radius: 50%; background: transparent; color: var(--text); cursor: pointer; }
+.icon-round-btn:hover { background: var(--surface-2); border-color: var(--border-strong); }
+.icon-round-btn svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+@media (max-width: 680px) { .topbar-actions { display: flex !important; } }
+
+/* Placeholder satu baris & lebih kecil supaya kotak ketik tidak tinggi */
+textarea::placeholder { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Selama jawaban "diketik", tombol aksi menunggu */
+.typing-active .assistant-actions, .typing-active .answer-disclaimer { visibility: hidden; }

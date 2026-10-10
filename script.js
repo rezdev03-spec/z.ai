@@ -277,6 +277,71 @@ function toggleFullscreen() {
 
 /* ───────────── Pesan ───────────── */
 
+/* ───────────── Sitasi [1][2] disembunyikan; sumber hanya di tombol Sources ───────────── */
+function stripCitations(text) {
+  const parts=String(text).split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g); // kode tidak disentuh
+  let out=parts.map((part,i)=>i%2?part:part.replace(/[ \t]*(?<![\w\\)])\[\d{1,2}(?:\s*[,–-]\s*\d{1,2})*\](?!\()/g,"")).join("");
+  // Baris penutup seperti "Referensi: [1] Nama Situs" tidak perlu lagi: sumbernya sudah ada di tombol Sources.
+  out=out.replace(/^[ \t]*[*_]*(?:Referensi|Sumber|Sources?|References?)[*_]*[ \t]*:[^\n]{0,200}$/gim,"");
+  return out.replace(/[ \t]+([.,;:!?])/g,"$1").replace(/\n{3,}/g,"\n\n").trim();
+}
+
+/* ───────────── Animasi mengetik ───────────── */
+const SKIP_TYPING=".answer-meta,.answer-note,.preview-cta,.code-heading,button";
+const ATOMIC_TYPING=".katex,.katex-display,.znx-math,img,hr";
+function typeReveal(body,row) {
+  if(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches)return;
+  const units=[];
+  let total=0;
+  const walker=document.createTreeWalker(body,NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT,{
+    acceptNode(n){
+      if(n.nodeType===1){
+        if(n.closest(SKIP_TYPING))return NodeFilter.FILTER_REJECT;
+        if(n.matches(ATOMIC_TYPING)&&!n.parentElement?.closest(ATOMIC_TYPING))return NodeFilter.FILTER_ACCEPT;
+        return NodeFilter.FILTER_SKIP;
+      }
+      if(n.parentElement?.closest(SKIP_TYPING)||n.parentElement?.closest(ATOMIC_TYPING))return NodeFilter.FILTER_REJECT;
+      return n.nodeValue?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_REJECT;
+    }
+  });
+  while(walker.nextNode()){
+    const n=walker.currentNode;
+    if(n.nodeType===3){units.push({node:n,text:n.nodeValue,len:n.nodeValue.length});total+=n.nodeValue.length;}
+    else{units.push({el:n,len:6});total+=6;}
+  }
+  if(total<40)return;
+  for(const u of units){if(u.node)u.node.nodeValue="";else u.el.style.visibility="hidden";}
+  row.classList.add("typing-active");
+  const seconds=Math.min(7,Math.max(1.4,total/110));
+  const cps=total/seconds;
+  const t0=performance.now();
+  let idx=0,consumed=0,finished=false,lastScroll=0;
+  const finish=()=>{
+    if(finished)return;finished=true;
+    for(const u of units){if(u.node)u.node.nodeValue=u.text;else u.el.style.visibility="";}
+    row.classList.remove("typing-active");
+    row.removeEventListener("click",finish);
+  };
+  row.addEventListener("click",finish); // ketuk jawaban = langsung tampilkan semuanya
+  const step=now=>{
+    if(finished)return;
+    const target=Math.min(total,Math.floor((now-t0)/1000*cps));
+    while(idx<units.length){
+      const u=units[idx],left=target-consumed;
+      if(left>=u.len){
+        if(u.node)u.node.nodeValue=u.text;else u.el.style.visibility="";
+        consumed+=u.len;idx++;
+      } else {
+        if(u.node&&left>0)u.node.nodeValue=u.text.slice(0,left);
+        break;
+      }
+    }
+    if(now-lastScroll>120&&nearBottom()){lastScroll=now;window.scrollTo({top:document.documentElement.scrollHeight});}
+    if(idx>=units.length)finish();else requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 function addAssistantActions(row, content, elapsedMs, usedThink, sources=[], webSearched=false, notes=[], modelLabel="") {
   const wrap=document.createElement("div");wrap.className="assistant-actions";
   const makeButton=(label,icon,fn)=>{
@@ -352,7 +417,8 @@ function addAssistantActions(row, content, elapsedMs, usedThink, sources=[], web
 }
 
 function addMessage(role, content, options={}) {
-  const {elapsedMs=0,usedThink=false,imageData=null,sources=[],webSearched=false,notes=[],modelLabel=""}=options;
+  const {elapsedMs=0,usedThink=false,imageData=null,sources=[],webSearched=false,notes=[],modelLabel="",animate=false}=options;
+  if(role==="assistant"&&(webSearched||(Array.isArray(sources)&&sources.length)))content=stripCitations(content);
   const row=document.createElement("article");
   row.className=`message ${role}`;
   row.style.animation="rise-in .22s ease both";
@@ -370,7 +436,7 @@ function addMessage(role, content, options={}) {
   if(role==="assistant")addAssistantActions(row,content,elapsedMs,usedThink,sources,webSearched,notes,modelLabel);
   row.querySelectorAll("[data-copy-code]").forEach(btn=>btn.addEventListener("click",()=>copyText(decodeURIComponent(btn.dataset.copyCode||""),btn)));
   appendMessageElement(row);
-  if(role==="assistant")hydrateMath(body);
+  if(role==="assistant"){hydrateMath(body);if(animate)typeReveal(body,row);}
   return row;
 }
 
@@ -679,7 +745,7 @@ async function runRequest(userContent) {
       notes.push(`${nameOf(responseData.fallbackFrom)} sedang bermasalah, jadi dijawab otomatis oleh ${nameOf(responseData.model)}.`);
     }
     const modelLabel=responseData.model?nameOf(responseData.model):"";
-    addMessage("assistant",reply,{elapsedMs:elapsed,usedThink:Boolean(responseData.thinkHarder),sources,webSearched:Boolean(responseData.webSearched),notes,modelLabel});
+    addMessage("assistant",reply,{elapsedMs:elapsed,usedThink:Boolean(responseData.thinkHarder),sources,webSearched:Boolean(responseData.webSearched),notes,modelLabel,animate:true});
     messages.push({role:"assistant",content:reply,sources});
     if(messages.length>16)messages=messages.slice(-16);
     const project=extractProjectFiles(reply);
