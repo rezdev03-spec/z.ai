@@ -44,6 +44,16 @@ let guardTimer = null;
 
 const LOCAL_QUOTA_KEY = "zennnyx_daily_usage_v2";
 const CLIENT_COOLDOWN_MS = 5000;
+// Mode pengembang: buka website dengan ?debug=1 sekali untuk menampilkan detail teknis (waktu, penyebab pindah model).
+// ?debug=0 untuk mematikan lagi. Pengunjung biasa tidak melihat detail teknis.
+const DEBUG_UI = (() => {
+  try {
+    const q = new URLSearchParams(location.search).get("debug");
+    if (q === "1") localStorage.setItem("zennnyx_debug", "1");
+    if (q === "0") localStorage.removeItem("zennnyx_debug");
+    return localStorage.getItem("zennnyx_debug") === "1";
+  } catch { return false; }
+})();
 const CLIENT_BURST_WINDOW_MS = 60000;
 const CLIENT_BURST_LIMIT = 3;
 const CLIENT_BURST_COOLDOWN_MS = 10000;
@@ -156,7 +166,7 @@ function updateQuota(serverData) {
   const used=DAILY_LIMIT-remain;
   const label=`${remain} / ${DAILY_LIMIT}`;
   $("quotaLabel").textContent=label;
-  $("dailyComposerStatus").textContent=remain===0?"Kuota harian habis":`${remain} pesan tersisa hari ini`;
+  $("dailyComposerStatus").textContent=remain===0?"Jatah hari ini habis":(remain<=5?`${remain} pesan tersisa`:"");
   $("quotaHint").textContent=remain===0?"Jatah balik lagi tengah malam WIB.":"Maksimal 20 pesan per hari (WIB).";
   $("quotaFill").style.width=`${(used/DAILY_LIMIT)*100}%`;
 }
@@ -391,7 +401,7 @@ function typeReveal(body,row) {
 function addAssistantActions(row, content, elapsedMs, usedThink, sources=[], webSearched=false, notes=[], modelLabel="") {
   const wrap=document.createElement("div");wrap.className="assistant-actions";
   const makeButton=(label,icon,fn)=>{
-    const b=document.createElement("button");b.type="button";b.className="action-btn";b.innerHTML=`<span class="action-icon">${icon}</span><span class="action-label">${label}</span>`;b.addEventListener("click",fn);return b;
+    const b=document.createElement("button");b.type="button";b.className="action-btn";b.title=label;b.setAttribute("aria-label",label);b.innerHTML=`<span class="action-icon">${icon}</span><span class="action-label">${label}</span>`;b.addEventListener("click",fn);return b;
   };
   wrap.appendChild(makeButton("Salin",icons.copy, e=>{}));
   const copyBtn=wrap.lastElementChild;
@@ -407,7 +417,7 @@ function addAssistantActions(row, content, elapsedMs, usedThink, sources=[], web
   const liveSources=Array.isArray(sources)?sources.filter(s=>s&&typeof s.url==="string"&&safeUrl(s.url)!=="#").slice(0,8):[];
   const fallbackUrls=webSearched?[]:extractUrls(content).map(url=>({title:url,url,domain:domainOf(url)}));
   const sourceList=(liveSources.length?liveSources:fallbackUrls).map(s=>({...s,domain:s.domain||domainOf(s.url)}));
-  const source=makeButton("Sources",icons.link,()=>{
+  const source=makeButton("Sumber",icons.link,()=>{
     // Klik kedua menutup. (Dulu popover langsung dihapus lagi oleh handler klik dokumen karena tombol ini tidak punya penanda.)
     const existing=row.querySelector(".sources-popover");
     if(existing){existing.remove();return;}
@@ -446,10 +456,12 @@ function addAssistantActions(row, content, elapsedMs, usedThink, sources=[], web
 
   const elapsed=(Math.max(0,elapsedMs)/1000).toFixed(1);
   const meta=document.createElement("div");meta.className="answer-meta";
-  meta.textContent=`Dibuat ${elapsed} dtk${usedThink?" · Think Harder":""}${webSearched?" · Web dicari":""}${modelLabel?` · ${modelLabel}`:""}`;
+  meta.textContent=DEBUG_UI
+    ? `Dibuat ${elapsed} dtk${usedThink?" · Berpikir lebih dalam":""}${webSearched?" · Web dicari":""}${modelLabel?` · ${modelLabel}`:""}`
+    : [modelLabel,webSearched?"dari internet":""].filter(Boolean).join(" · ");
   const answer=row.querySelector(".answer");
   const noteEls=notes.map(text=>{const n=document.createElement("div");n.className="answer-note";n.textContent=text;return n;});
-  const top=[meta,...noteEls];
+  const top=[...(meta.textContent?[meta]:[]),...noteEls];
   if(project){
     // Tombol pratinjau ditaruh di ATAS jawaban, supaya langsung kelihatan tanpa menggulir melewati kode panjang.
     const cta=document.createElement("button");cta.type="button";cta.className="preview-cta";
@@ -459,7 +471,6 @@ function addAssistantActions(row, content, elapsedMs, usedThink, sources=[], web
   }
   answer.prepend(...top);
   row.appendChild(wrap);
-  const disclaimer=document.createElement("div");disclaimer.className="answer-disclaimer";disclaimer.textContent="ZennNyx AI bisa keliru. Cek ulang info penting.";row.appendChild(disclaimer);
 }
 
 function addMessage(role, content, options={}) {
@@ -556,11 +567,11 @@ function togglePopover(el, open) {
   if(open){el.hidden=false;} else {el.hidden=true;}
 }
 function updateThinkMenu() {thinkMenuBtn.setAttribute("aria-pressed",String(thinkHarder));}
-function setThinkHarder(value) {thinkHarder=Boolean(value);updateThinkMenu();togglePopover(attachPopover,false);showToast(thinkHarder?"Think Harder aktif":"Think Harder nonaktif");}
+function setThinkHarder(value) {thinkHarder=Boolean(value);updateThinkMenu();togglePopover(attachPopover,false);showToast(thinkHarder?"Berpikir lebih dalam: aktif":"Berpikir lebih dalam: mati");}
 
 function updateWebMenu() {
   webMenuBtn.setAttribute("aria-pressed",String(webMode==="on"));
-  $("webMenuHint").textContent=!webAvailable?"Belum aktif · pasang TAVILY_API_KEY":(webMode==="on"?"Selalu mencari di web":"Otomatis · ketuk untuk selalu cari");
+  $("webMenuHint").textContent=!webAvailable?"Belum tersedia":(webMode==="on"?"Selalu cari di internet":"Otomatis, cari kalau perlu");
   $("webStatus").textContent=!webAvailable?"Belum dipasang":(webMode==="on"?"Selalu":"Otomatis");
 }
 function setWebMode(mode) {
@@ -614,9 +625,9 @@ function prepareHistoryForRequest() {
 function updateSendState() {
   sendBtn.disabled=busy||!String(input.value).trim()&&!pendingImage||!clientCanSend()||modelChoices.length===0;
   const remaining=serverQuota&&serverQuota.day===jakartaDay()?serverQuota.remaining:Math.max(0,DAILY_LIMIT-readLocalQuota().used);
-  if(remaining<=0) $("composerHint").textContent="Kuota 20 pesan hari ini habis · kembali besok WIB";
+  if(remaining<=0) $("composerHint").textContent="Jatah hari ini habis, kembali lagi besok";
   else if(clientGuardRemaining()>0) $("composerHint").textContent="Jeda sebentar sebelum pesan berikutnya";
-  else $("composerHint").textContent="Enter baris baru · Ctrl+Enter kirim";
+  else $("composerHint").textContent="";
   scheduleGuardUnlock();
 }
 
@@ -824,10 +835,12 @@ async function runRequest(userContent) {
     const elapsed=performance.now()-started;
     const sources=Array.isArray(responseData.sources)?responseData.sources:[];
     const notes=[];
-    if(responseData.searchError)notes.push(`Web search tidak jalan: ${responseData.searchError}`);
+    if(responseData.searchError&&DEBUG_UI)notes.push(`Web search tidak jalan: ${responseData.searchError}`);
     const nameOf=id=>{const m=modelChoices.find(x=>x.id===id);return m?displayModelName(m):String(id).replace(/:free$/,"").split("/").pop();};
     if(responseData.fallbackFrom&&responseData.model){
-      notes.push(`${nameOf(responseData.fallbackFrom)} sedang bermasalah, jadi dijawab otomatis oleh ${nameOf(responseData.model)}.${responseData.fallbackReason?` Penyebab: ${responseData.fallbackReason}`:""}`);
+      notes.push(DEBUG_UI
+        ? `${nameOf(responseData.fallbackFrom)} sedang bermasalah, jadi dijawab otomatis oleh ${nameOf(responseData.model)}.${responseData.fallbackReason?` Penyebab: ${responseData.fallbackReason}`:""}`
+        : `${nameOf(responseData.fallbackFrom)} sedang sibuk, jadi dijawab oleh ${nameOf(responseData.model)}.`);
     }
     const modelLabel=responseData.model?nameOf(responseData.model):"";
     addMessage("assistant",reply,{elapsedMs:elapsed,usedThink:Boolean(responseData.thinkHarder),sources,webSearched:Boolean(responseData.webSearched),notes,modelLabel,animate:true});
@@ -883,11 +896,35 @@ function bindSuggestions() {
 function closeSidebar() {
   sidebar.classList.remove("open");sidebarScrim.hidden=true;
 }
+// Posisi kotak ketik di atas keyboard.
+// Dua perilaku browser ditangani sekaligus:
+//  (a) keyboard MENGECILKAN layout viewport (meta interactive-widget=resizes-content, Chrome/Brave Android baru): kotak yang
+//      menempel di bawah layar otomatis naik, jadi tidak perlu tambahan apa pun (inset = 0);
+//  (b) keyboard hanya mengecilkan visual viewport (iOS, browser lama): kotak harus dinaikkan manual setinggi keyboard.
+// Kenapa dulu kadang tertutup / kadang kejauhan: nilai lama menggantung (event window.resize tidak didengar, dan innerHeight
+// tidak selalu ikut berubah), serta jarak aman gesture-bar ikut ditambahkan padahal keyboard sedang terbuka.
+function isTypingField(el) {
+  return Boolean(el&&(el===input||/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)||el.isContentEditable));
+}
+let kbFrame=0;
 function updateKeyboardInset() {
-  if(!window.visualViewport)return;
-  const vv=window.visualViewport;
-  const inset=Math.max(0,window.innerHeight-vv.height-vv.offsetTop);
-  document.documentElement.style.setProperty("--keyboard-inset",`${Math.round(inset)}px`);
+  cancelAnimationFrame(kbFrame);
+  kbFrame=requestAnimationFrame(()=>{
+    const root=document.documentElement, vv=window.visualViewport;
+    const typing=isTypingField(document.activeElement);
+    let inset=0;
+    if(vv&&typing){
+      const layoutH=root.clientHeight||window.innerHeight;
+      inset=Math.round(layoutH-vv.height-vv.offsetTop);
+      if(inset<80)inset=0; // selisih kecil = bar alamat/bar sistem, bukan keyboard
+    }
+    root.style.setProperty("--keyboard-inset",`${Math.max(0,inset)}px`);
+    root.classList.toggle("is-typing",typing);
+  });
+}
+function settleKeyboardInset() {
+  updateKeyboardInset();
+  [60,160,320,640,1100].forEach(ms=>setTimeout(updateKeyboardInset,ms));
 }
 function setupRecognition() {
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
@@ -980,8 +1017,12 @@ if(window.visualViewport){
   window.visualViewport.addEventListener("resize",updateKeyboardInset,{passive:true});
   window.visualViewport.addEventListener("scroll",updateKeyboardInset,{passive:true});
 }
-input.addEventListener("focus",()=>{updateKeyboardInset();setTimeout(updateKeyboardInset,100);setTimeout(updateKeyboardInset,300);setTimeout(()=>input.scrollIntoView({block:"nearest",behavior:"smooth"}),80);});
-input.addEventListener("blur",()=>setTimeout(updateKeyboardInset,140));
+window.addEventListener("resize",updateKeyboardInset,{passive:true});
+window.addEventListener("orientationchange",settleKeyboardInset);
+document.addEventListener("focusin",settleKeyboardInset);
+document.addEventListener("focusout",()=>{updateKeyboardInset();setTimeout(updateKeyboardInset,150);setTimeout(updateKeyboardInset,500);});
+document.addEventListener("visibilitychange",updateKeyboardInset);
+input.addEventListener("focus",()=>{setTimeout(()=>input.scrollIntoView({block:"nearest",behavior:"smooth"}),120);});
 // Cadangan: kalau KaTeX telat/terlambat termuat, render ulang rumus yang masih berupa teks.
 window.addEventListener("load",()=>hydrateMath(document));
 let refitTimer=null;

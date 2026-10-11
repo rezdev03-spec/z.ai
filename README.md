@@ -1,4 +1,4 @@
-# ZennNyx AI v9.14 — Workspace
+# ZennNyx AI v9.16 — Workspace
 
 Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model picker, full-screen website preview, KaTeX math, real web sources, and a 20-message daily quota (WIB).
 
@@ -8,6 +8,7 @@ Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model p
 3. Run `npm run check` locally if you want to syntax-check everything.
 
 ## Environment variables
+- `DIAG_SECRET` (optional; kata sandi untuk halaman tes `/api/diag`, lihat v9.15)
 - `MISTRAL_API_KEY` (optional; Mistral, paket gratis "Experiment": verifikasi nomor HP, tanpa kartu kredit; data bisa dipakai Mistral untuk training)
 - `NVIDIA_API_KEY` (optional; NVIDIA NIM dari build.nvidia.com, gratis, verifikasi nomor HP, kira-kira 40 permintaan/menit per akun)
 - `MISTRAL_MODELS`, `NVIDIA_MODELS` (optional; ganti daftar model, dipisah koma, tanpa edit kode)
@@ -20,6 +21,19 @@ Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model p
 - `PUBLIC_APP_URL` (optional; OpenRouter attribution)
 
 API keys stay on the server.
+
+## v9.16 — what changed (`index.html`, `style.css`, `script.js`, `api/chat.js`, `lib/models.js`)
+- **Warna hitam-putih**: dark = hitam murni + teks putih, light = putih + teks hitam. Warna merah/hijau diganti abu-abu, ikon logo model dibuat hitam-putih.
+- **Font**: jawaban, pesan, dan judul memakai **Literata** (serif yang dirancang untuk dibaca di layar, tetap berkesan klasik), dimuat dari Google Fonts, dengan cadangan Georgia kalau gagal dimuat. Teks tombol/menu tetap sans-serif.
+- **UI lebih simpel**: layar sambutan jadi satu judul + 4 tombol; kartu fitur, label kecil kapital, catatan "bisa keliru", "Dibuat X dtk", info WORKSPACE/versi, tombol Ctrl K, dan teks teknis (API key, TAVILY_API_KEY) dibuang; tab Obrolan/Pratinjau baru muncul kalau ada pratinjau; tombol di bawah jawaban jadi ikon saja; sisa jatah pesan baru tampil kalau tinggal 5 atau kurang; teks pop-up pengenalan dipersingkat.
+- **Mode pengembang**: buka website dengan `?debug=1` sekali untuk menampilkan lagi detail teknis (waktu respons, "Penyebab:" pindah model). `?debug=0` mematikannya. Pengunjung biasa hanya melihat "X sedang sibuk, jadi dijawab oleh Y".
+- **Kotak ketik vs keyboard**: meta viewport `interactive-widget=resizes-content` (layout ikut mengecil saat keyboard muncul), ditambah perhitungan jarak keyboard yang baru: memakai tinggi layout yang sebenarnya, mendengarkan `window.resize`/fokus/blur dengan pengecekan ulang, mengabaikan selisih kecil (<80px), nol saat tidak sedang mengetik, dan tidak menambah jarak gesture-bar saat keyboard terbuka.
+- **Nada bicara**: "gue/lu" hanya dipakai kalau user sendiri memakainya; selain itu "aku/kamu" atau netral. Model kecil (mis. GPT-OSS 20B) jadi tidak memaksakan slang.
+- **Model**: GLM-5.3 Flash jadi prioritas awal lebih tinggi di mode Otomatis (cepat dan enak diajak ngobrol); GPT-OSS 20B diturunkan. Deskripsi model dipersingkat.
+
+## v9.15 — what changed (`lib/stream.js` baru, `api/diag.js` baru, `api/chat.js`, `vercel.json`)
+- **Streaming ke Mistral/NVIDIA**: server kini membaca jawaban sambil mengalir, jadi tahu di tahap mana request macet. Catatan merah (Penyebab) sekarang membedakan: (a) "tidak ada respons sama sekali" = belum diterima/antre, (b) "request DITERIMA tapi belum ada token" = antre di provider, (c) "sudah mulai menjawab lalu berhenti", (d) "diproses tapi belum selesai saat batas waktu" lengkap dengan jumlah karakter yang sempat dipikirkan. Jawaban yang sudah sebagian ditampilkan (diberi catatan terpotong) alih-alih dibuang dan diganti model lain. Batas tunggu model besar naik ke 38 dtk.
+- **`/api/diag` (tes langsung, tanpa kuota chat, tanpa fallback)**: aktif kalau env `DIAG_SECRET` diisi. Buka `/api/diag?key=<DIAG_SECRET>` untuk daftar model, lalu `/api/diag?key=<DIAG_SECRET>&model=nvidia::deepseek-ai/deepseek-v4.1-flash`. Hasilnya JSON: diterima atau tidak, waktu sampai header, waktu token pertama, total, dan jumlah karakter berpikir. Opsional: `&wait=50` (detik) `&tokens=512` `&prompt=teks`. Tanpa `DIAG_SECRET`, halaman ini mati (404).
 
 ## v9.14 — what changed (`lib/models.js`, `api/chat.js`)
 - Model NVIDIA default diganti ke model yang BEDA dari Groq: **DeepSeek V4.1 Flash** (`deepseek-ai/deepseek-v4.1-flash`, bisa baca gambar), **GLM-5.3** (`z-ai/glm-5.3`), dan **GLM-5.3 Flash** (`z-ai/glm-5.3-flash`, bisa baca gambar). Id-nya dicocokkan dengan halaman build.nvidia.com.

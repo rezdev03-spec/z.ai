@@ -5,6 +5,9 @@
     },
     "api/models.js": {
       "maxDuration": 15
+    },
+    "api/diag.js": {
+      "maxDuration": 60
     }
   }
 }

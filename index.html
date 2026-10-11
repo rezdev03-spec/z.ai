@@ -2,9 +2,13 @@
 <html lang="id">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#f6f5f1">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400..700;1,7..72,400..600&display=swap">
   <title>ZennNyx AI</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.19.0/dist/katex.min.css" integrity="sha384-3rdsX6e5mueWyoweR9NIVmtEsUkokpBT/0ALqKKIBMr9j4qhHkaIkAcGgsE6uVlp" crossorigin="anonymous">
@@ -19,28 +23,20 @@
     <aside id="sidebar" class="sidebar">
       <div class="sidebar-brand">
         <span class="brand-mark" aria-hidden="true"><svg class="brand-glyph" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3.5v5M16 23.5v5M3.5 16h5M23.5 16h5M7.2 7.2l3.6 3.6M21.2 21.2l3.6 3.6M24.8 7.2l-3.6 3.6M10.8 21.2l-3.6 3.6"/><path d="m12 9.5 8 0 4.5 6.5-4.5 6.5h-8L7.5 16Z"/><circle cx="16" cy="16" r="3.1"/><circle cx="16" cy="3.5" r="1"/><circle cx="16" cy="28.5" r="1"/><circle cx="3.5" cy="16" r="1"/><circle cx="28.5" cy="16" r="1"/></svg></span>
-        <div class="brand-copy"><strong>ZennNyx</strong><small>AI WORKSPACE</small></div>
+        <div class="brand-copy"><strong>ZennNyx</strong></div>
         <button id="sidebarCloseBtn" class="icon-plain sidebar-close" type="button" aria-label="Tutup menu">×</button>
       </div>
       <button id="newChatBtn" class="new-chat-btn" type="button">
-        <span aria-hidden="true">＋</span><span>Chat baru</span><kbd>Ctrl K</kbd>
+        <span aria-hidden="true">＋</span><span>Chat baru</span>
       </button>
-      <div class="sidebar-section-label">WORKSPACE</div>
-      <div class="sidebar-info-row"><span class="sidebar-status-dot"></span><span>Ruang obrolan</span></div>
-      <div class="sidebar-info-row"><span class="sidebar-mini-icon">⌘</span><span>Model AI</span><span id="sidebarModelName" class="sidebar-muted">Memuat…</span></div>
-      <div class="sidebar-info-row"><span class="sidebar-mini-icon">⌁</span><span>Web Search</span><span id="webStatus" class="sidebar-muted">Tersedia</span></div>
+      <div class="sidebar-hidden-data" hidden><span id="sidebarModelName"></span><span id="webStatus"></span></div>
       <div class="sidebar-spacer"></div>
       <div class="quota-card">
-        <div class="quota-card-head"><span>Kuota harian</span><strong id="quotaLabel">20 / 20</strong></div>
+        <div class="quota-card-head"><span>Pesan hari ini</span><strong id="quotaLabel">20 / 20</strong></div>
         <div class="quota-track"><span id="quotaFill"></span></div>
-        <p id="quotaHint">Maksimal 20 pesan setiap hari.</p>
+        <p id="quotaHint" hidden></p>
       </div>
-      <div class="sidebar-footer">
-        <div class="avatar-mark" aria-hidden="true"><svg class="brand-glyph" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3.5v5M16 23.5v5M3.5 16h5M23.5 16h5M7.2 7.2l3.6 3.6M21.2 21.2l3.6 3.6M24.8 7.2l-3.6 3.6M10.8 21.2l-3.6 3.6"/><path d="m12 9.5 8 0 4.5 6.5-4.5 6.5h-8L7.5 16Z"/><circle cx="16" cy="16" r="3.1"/><circle cx="16" cy="3.5" r="1"/><circle cx="16" cy="28.5" r="1"/><circle cx="3.5" cy="16" r="1"/><circle cx="28.5" cy="16" r="1"/></svg></div>
-        <div><strong>ZennNyx AI</strong><small>Personal AI workspace</small></div>
-        <span class="footer-version">v9.8</span>
-      </div>
-    </aside>
+      </aside>
 
     <main class="main-shell">
       <header class="topbar">
@@ -71,44 +67,15 @@
       </section>
       <template id="welcomeTemplate">
       <div id="welcome" class="welcome">
-            <div class="welcome-kicker"><span class="kicker-line"></span> RUANG KERJA AI PRIBADI <span class="kicker-line"></span></div>
-            <h1>Ide besar dimulai<br><em>dari satu pertanyaan.</em></h1>
-            <p class="welcome-intro">Ngobrol santai, cari informasi terbaru, pecahkan soal, atau bangun sesuatu dari nol. Pilih model yang cocok, lalu mulai.</p>
-
-            <div class="welcome-feature-grid">
-              <article class="feature-card">
-                <div class="feature-art art-orbit" aria-hidden="true">
-                  <svg viewBox="0 0 240 110"><path d="M25 80 75 25h95l45 55Z"/><ellipse cx="120" cy="55" rx="92" ry="28"/><ellipse cx="120" cy="55" rx="45" ry="58" transform="rotate(38 120 55)"/><circle cx="120" cy="55" r="9"/><circle cx="42" cy="70" r="4"/><circle cx="198" cy="39" r="4"/></svg>
-            </div>
-                <div class="feature-number">01 / KNOWLEDGE</div>
-                <h2>Cari tahu lebih jauh.</h2>
-                <p>Jawaban, penjelasan, dan web search yang menyertakan sumber untuk hal-hal aktual.</p>
-              </article>
-              <article class="feature-card">
-                <div class="feature-art art-window" aria-hidden="true">
-                  <svg viewBox="0 0 240 110"><rect x="25" y="18" width="190" height="76" rx="2"/><path d="M25 37h190M39 27h3M49 27h3M59 27h3M44 52h52M44 64h76M44 76h36M145 52h49M145 64h33M145 76h45"/><path d="m111 48 12 10-12 10"/></svg>
-                </div>
-                <div class="feature-number">02 / BUILD</div>
-                <h2>Rakit ide jadi nyata.</h2>
-                <p>Bikin HTML, CSS, dan JavaScript, lalu lihat hasilnya langsung di panel pratinjau.</p>
-              </article>
-              <article class="feature-card feature-wide">
-                <div class="feature-art art-equation" aria-hidden="true">
-                  <svg viewBox="0 0 240 110"><path d="M20 28h52M46 12v32M91 20l26 26M117 20 91 46M141 28h34M158 11v34M190 28h30"/><circle cx="205" cy="75" r="17"/><path d="M195 75h20M205 65v20"/><path d="M22 79h116M31 68l-9 11 9 11"/></svg>
-                </div>
-                <div class="feature-wide-copy"><div class="feature-number">03 / THINK</div><h2>Belajar, hitung, dan pecahkan masalah.</h2><p>Penjelasan langkah demi langkah, rumus matematika yang dirender rapi, dan analisis yang bisa diperdalam.</p></div>
-              </article>
-            </div>
-
-            <div class="suggestions-heading"><span>COBA MULAI DARI SINI</span><span>PILIH SATU →</span></div>
-            <div class="suggestions">
-              <button type="button" data-prompt="Jelasin satu hal menarik yang lagi ramai dibahas minggu ini.">Cari info terbaru <span>↗</span></button>
-              <button type="button" data-prompt="Bantu gue bikin landing page modern dengan HTML, CSS, dan JavaScript. Tampilkan preview-nya juga.">Bikin website <span>↗</span></button>
-              <button type="button" data-prompt="Ajari gue cara menyelesaikan persamaan kuadrat, pakai rumus matematika yang rapi dan langkah-langkahnya.">Belajar matematika <span>↗</span></button>
-              <button type="button" data-prompt="Gue punya ide project, bantu gue pecah jadi langkah yang realistis.">Kembangin ide <span>↗</span></button>
-            </div>
-            <div class="welcome-footnote">Dibuat buat eksplorasi. Tetap cek ulang informasi penting.</div>
-          </div>
+        <h1>Mau tanya apa hari ini?</h1>
+        <p class="welcome-intro">Tanya apa saja, cari info terbaru, belajar, atau minta dibuatkan sesuatu.</p>
+        <div class="suggestions">
+          <button type="button" data-prompt="Jelasin satu hal menarik yang lagi ramai dibahas minggu ini.">Info terbaru</button>
+          <button type="button" data-prompt="Bantu aku bikin landing page modern dengan HTML, CSS, dan JavaScript. Tampilkan preview-nya juga.">Bikin website</button>
+          <button type="button" data-prompt="Ajari aku cara menyelesaikan persamaan kuadrat, lengkap dengan langkah-langkahnya.">Belajar matematika</button>
+          <button type="button" data-prompt="Aku punya ide project, bantu aku pecah jadi langkah yang realistis.">Kembangkan ide</button>
+        </div>
+      </div>
       </template>
 
       <section id="previewView" class="preview-view" hidden>
@@ -132,7 +99,7 @@
         <div id="imagePreview" class="image-preview" hidden></div>
         <div class="composer-shell">
           <div class="composer-context">
-            <span id="composeMode">CHAT</span><span class="context-separator">/</span>
+            <span id="composeMode" hidden>CHAT</span>
             <span id="selectedModelLabel">Pilih model</span>
             <span class="context-spacer"></span>
             <span id="dailyComposerStatus" class="quota-inline">20 pesan tersisa hari ini</span>
@@ -157,16 +124,15 @@
         <div id="modelPickerPopover" class="model-picker-popover" hidden role="dialog" aria-label="Pilih model AI">
           <div class="model-picker-heading">
             <strong>Pilih model AI</strong>
-            <span>Ikon membantu membedakan model</span>
+            
           </div>
           <div id="modelPickerList" class="model-picker-list"><div class="model-picker-empty">Memuat model…</div></div>
-          <div class="model-picker-footnote">API key tetap tersimpan di server.</div>
         </div>
         <div id="attachPopover" class="attach-popover" hidden role="menu" aria-label="Lampiran dan mode berpikir">
-          <button class="attach-menu-item" type="button" data-action="camera"><span class="menu-icon">▣</span><span><strong>Kamera</strong><small>Ambil gambar sekarang</small></span></button>
+          <button class="attach-menu-item" type="button" data-action="camera"><span class="menu-icon">▣</span><span><strong>Kamera</strong><small>Ambil foto sekarang</small></span></button>
           <button class="attach-menu-item" type="button" data-action="photo"><span class="menu-icon">▧</span><span><strong>Foto</strong><small>Pilih dari galeri</small></span></button>
-          <button id="thinkMenuBtn" class="attach-menu-item" type="button" data-action="think" aria-pressed="false"><span class="menu-icon">∴</span><span><strong>Think Harder</strong><small>Jawaban lebih mendalam</small></span><span class="menu-check">✓</span></button>
-          <button id="webMenuBtn" class="attach-menu-item" type="button" data-action="web" aria-pressed="false"><span class="menu-icon">⌁</span><span><strong>Web Search</strong><small id="webMenuHint">Otomatis · ketuk untuk selalu cari</small></span><span class="menu-check">✓</span></button>
+          <button id="thinkMenuBtn" class="attach-menu-item" type="button" data-action="think" aria-pressed="false"><span class="menu-icon">∴</span><span><strong>Berpikir lebih dalam</strong><small>Jawaban lebih teliti, tapi lebih lama</small></span><span class="menu-check">✓</span></button>
+          <button id="webMenuBtn" class="attach-menu-item" type="button" data-action="web" aria-pressed="false"><span class="menu-icon">⌁</span><span><strong>Cari di internet</strong><small id="webMenuHint">Otomatis</small></span><span class="menu-check">✓</span></button>
         </div>
       </div>
     </main>
@@ -176,10 +142,8 @@
     <div class="intro-backdrop" data-intro-close></div>
     <div class="intro-card">
       <button id="introCloseX" class="intro-x" type="button" data-intro-close aria-label="Tutup">×</button>
-      <div class="intro-kicker">TENTANG PROJECT INI</div>
       <h2 id="introTitle">Halo, selamat datang di ZennNyx AI</h2>
-      <p>Ini adalah website AI yang aku kembangkan dengan bantuan berbagai AI, mulai dari ChatGPT, Claude, dan lain-lain.</p>
-      <p>Supaya bisa dipakai gratis, website ini memakai provider API gratis dari <strong>Groq</strong>, <strong>Google AI Studio</strong>, <strong>OpenRouter</strong>, <strong>Mistral</strong>, dan <strong>NVIDIA</strong>. Kadang model bisa lambat atau kena limit, dan sistem akan otomatis mencoba model lain.</p>
+      <p>Asisten AI gratis buatan Zenn. Tanya apa saja, atau kirim foto untuk dibahas. Kalau satu model sedang sibuk, otomatis dialihkan ke model lain.</p>
       <p class="intro-credit">Project ini dibuat oleh <strong>Zenn</strong>. Ikuti di TikTok: <a href="https://www.tiktok.com/@zennlonevyn" target="_blank" rel="noopener noreferrer">@zennlonevyn</a></p>
       <div class="intro-footer">
         <label class="intro-check"><input id="introDontShow" type="checkbox"><span>Jangan tampilkan lagi</span></label>
