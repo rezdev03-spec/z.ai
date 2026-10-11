@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { streamChatCompletion, describeStall } from "../lib/stream.js";
 import { getFreeChatModels, isFreeId, isNonChatModel } from "../lib/openrouter.js";
 import { GROQ_MODELS, GEMINI_MODELS, COMPAT_PROVIDERS, getCompatModels, listAvailableModels } from "../lib/models.js";
 
@@ -329,7 +330,7 @@ function buildContinuity(messages) {
 /* ───────────── Prompt ───────────── */
 
 function systemPrompt({ thinkHarder, currentDate, webSources, wantsWeb, wantsCode, continuity = "" }) {
-  const tone = `Kamu adalah ZennNyx AI, asisten personal yang cerdas dan enak diajak ngobrol. Balas dengan bahasa yang dipakai user. Kalau user ngobrol dalam bahasa Indonesia, pakai bahasa Indonesia sehari-hari yang natural dan santai, lebih mirip teman ngobrol daripada customer service. Ikuti gaya "gue/lu" jika user memakai gaya itu; hindari "saya/Anda" dan bahasa kantor yang kaku kecuali user minta formal. Jangan memaksakan slang di setiap kalimat. Jaga jawaban tetap jelas, jujur, dan berguna. Tanggal saat ini di WIB: ${currentDate}. Gunakan Markdown dengan benar.
+  const tone = `Kamu adalah ZennNyx AI, asisten personal yang cerdas dan enak diajak ngobrol. Balas dengan bahasa yang dipakai user. Untuk bahasa Indonesia, pakai bahasa sehari-hari yang natural, hangat, dan tidak kaku, seperti teman yang pintar, bukan customer service. Sesuaikan cara menyapa dengan user: pakai "gue/lu" HANYA kalau user sendiri memakainya di pesannya; kalau user memakai "aku/kamu" atau tidak memakai kata ganti, pakai "aku/kamu" atau hindari kata ganti sama sekali. Jangan memaksakan slang atau kata gaul; kalau ragu, pilih gaya netral yang santai dan sopan. Hindari "saya/Anda" kecuali user meminta formal. Jaga jawaban tetap jelas, jujur, dan berguna. Tanggal saat ini di WIB: ${currentDate}. Gunakan Markdown dengan benar.
 
 MATEMATIKA: tulis rumus dengan LaTeX. Inline: \\( ... \\). Rumus blok: \\[ ... \\]. Beberapa langkah yang sejajar ditaruh dalam SATU blok: \\[ \\begin{aligned} x_1 &= ... \\\\ x_2 &= ... \\end{aligned} \\]. Jangan pernah menaruh format Markdown (** _ \`) di dalam rumus; pakai x_1 atau x_{1} untuk subskrip. Jangan pakai tanda $ untuk rumus (bentrok dengan tanda uang). Jangan menulis perintah LaTeX seperti \\times atau \\frac sebagai teks polos di luar delimiter.
 
@@ -536,22 +537,39 @@ function cleanKey(value) {
 async function callCompat(candidate, messages, prompt, opts, deadline) {
   const { provider, id: model } = candidate;
   const cfg = COMPAT_PROVIDERS[provider];
-  const { response, data } = await postJson(cfg.label, `${cfg.baseUrl}/chat/completions`,
-    { Authorization: `Bearer ${cleanKey(process.env[cfg.env])}` },
-    {
+  const total = deadline.timeout(opts.attemptCap);
+  // Streaming: kita tahu apakah request diterima, kapan token pertama datang, dan apakah macet di tengah jalan.
+  const r = await streamChatCompletion({
+    url: `${cfg.baseUrl}/chat/completions`,
+    headers: { Authorization: `Bearer ${cleanKey(process.env[cfg.env])}` },
+    body: {
       model,
       messages: [{ role: "system", content: prompt }, ...messages],
       max_tokens: tokenBudget.compat(opts, candidate.reasoning),
       temperature: opts.thinkHarder ? 0.55 : 0.7
     },
-    deadline.timeout(opts.attemptCap));
-  if (!response.ok) { console.error(`${cfg.label} error:`, model, response.status, upstreamMessage(data)); throw upstreamFail(cfg.label, response.status, data); }
-  const reply = stripThinking(textFromOpenAIResponse(data));
-  if (!reply) {
-    const why = data?.choices?.[0]?.finish_reason === "length" ? " (token habis dipakai untuk berpikir)" : "";
+    firstByteMs: Math.min(20000, total),
+    firstTokenMs: Math.min(30000, total),
+    idleMs: 15000,
+    totalMs: total
+  });
+  if (r.errorData) {
+    const status = r.status && r.status !== 200 ? r.status : 502;
+    console.error(`${cfg.label} error:`, model, status, upstreamMessage(r.errorData));
+    throw upstreamFail(cfg.label, status, r.errorData);
+  }
+  const text = stripThinking(r.text);
+  if (r.abort || r.networkError) {
+    console.error(`${cfg.label} stream:`, model, r.abort || r.networkError, `headers=${r.headersMs}ms ttft=${r.ttftMs}ms total=${r.totalMs}ms reasoning=${r.reasoningChars}`);
+    // Sudah ada jawaban sebagian: lebih baik tampilkan daripada ganti model dan mulai dari nol.
+    if ((r.abort === "deadline" || r.abort === "stalled") && text.length > 40) return `${text}\n\n_(Jawaban terpotong: ${cfg.label} belum selesai saat batas waktu server.)_`;
+    throw new UpstreamError(describeStall(cfg.label, r), { status: 504 });
+  }
+  if (!text) {
+    const why = r.finish === "length" ? " (token habis dipakai untuk berpikir)" : "";
     throw new UpstreamError(`${cfg.label}: model mengembalikan jawaban kosong${why}. Coba kirim ulang.`, { status: 502 });
   }
-  return reply;
+  return text;
 }
 
 async function callGroq(model, messages, prompt, opts, deadline) {
@@ -724,7 +742,7 @@ async function runWithAutoSwitch(chain, messages, promptFor, opts, deadline) {
     if (attempts.length && deadline.left() < 7000) break;
     const n = attempts.length;
     opts.attemptCap = opts.wantsCode ? [44000, 22000, 18000, 18000][n] : [20000, 14000, 12000, 12000][n];
-    if (model.slow) opts.attemptCap = Math.max(opts.attemptCap, 32000); // model reasoning besar: beri waktu lebih sebelum dianggap gagal
+    if (model.slow) opts.attemptCap = Math.max(opts.attemptCap, 38000); // model reasoning besar: beri waktu lebih sebelum dianggap gagal
     const t0 = Date.now();
     try {
       const reply = await callCandidate(model, messages, promptFor, opts, deadline);
