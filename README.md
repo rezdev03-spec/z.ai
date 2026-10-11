@@ -1,4 +1,4 @@
-# ZennNyx AI v9.16 — Workspace
+# ZennNyx AI v9.17 — Workspace
 
 Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model picker, full-screen website preview, KaTeX math, real web sources, and a 20-message daily quota (WIB).
 
@@ -21,6 +21,12 @@ Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model p
 - `PUBLIC_APP_URL` (optional; OpenRouter attribution)
 
 API keys stay on the server.
+
+## v9.17 — what changed (`index.html`, `style.css`, `script.js`, + file ikon baru)
+- **Font**: jawaban/pesan kini **Merriweather** (serif klasik dengan huruf lebar dan tinggi-x besar, paling terbaca di layar HP), ukuran 16.5px, jarak baris 1.85. Teks dark sedikit diredam (#f4f4f4) supaya tidak "menyilaukan" di latar hitam murni. Ganti font cukup di satu tempat: variabel `--font-read` di `style.css` dan tautan Google Fonts di `index.html`.
+- **Panel Sumber ringkas**: satu baris per sumber (ikon situs, judul, tautan singkat), tanpa cuplikan teks dan tanpa judul panel. Tautan ditampilkan disingkat (mis. `kompas.com/bola/read/2026/10/11/12345…`) tapi tetap membuka alamat lengkapnya. Daftar bisa digulir kalau panjang.
+- **Art ASCII di layar awal chat baru**: emblem heksagon (meniru logo) + tulisan ZENN NYX + garis `[ A I ]`, murni karakter ASCII supaya rata di semua HP. Muncul dengan efek "pindai" dari atas ke bawah (mati otomatis kalau HP diatur kurangi animasi).
+- **Ikon website**: `favicon.svg`, `favicon.ico`, `favicon-32.png`, `apple-touch-icon.png`, `icon-192.png`, `icon-512.png`, dan `site.webmanifest` (ikon saat "Tambahkan ke layar utama"). Semuanya logo ZennNyx putih di kotak hitam.
 
 ## v9.16 — what changed (`index.html`, `style.css`, `script.js`, `api/chat.js`, `lib/models.js`)
 - **Warna hitam-putih**: dark = hitam murni + teks putih, light = putih + teks hitam. Warna merah/hijau diganti abu-abu, ikon logo model dibuat hitam-putih.

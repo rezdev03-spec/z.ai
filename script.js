@@ -115,6 +115,17 @@ function brandIconHtml(key, className = "brand-img") {
 }
 window.znxGenericIcon = GENERIC_ICON;
 function faviconUrl(domain) { return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`; }
+// Tampilan tautan yang disingkat (klik tetap membuka alamat lengkap): "kompas.com/tren/read/2026/…"
+function shortUrl(url) {
+  try {
+    const u=new URL(url);
+    const host=u.hostname.replace(/^www\./,"");
+    const path=u.pathname.replace(/\/$/,"");
+    if(!path)return host;
+    const full=host+path;
+    return full.length>38?full.slice(0,37)+"…":full;
+  } catch { return String(url).slice(0,38); }
+}
 function domainOf(url) { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } }
 function faviconImg(domain, cls = "source-favicon") {
   const img = document.createElement("img");
@@ -424,17 +435,15 @@ function addAssistantActions(row, content, elapsedMs, usedThink, sources=[], web
     document.querySelectorAll(".sources-popover").forEach(el=>el.remove());
     if(!sourceList.length)return;
     const pop=document.createElement("div");pop.className="sources-popover";
-    const heading=document.createElement("div");heading.className="sources-title";heading.textContent=webSearched?"Sumber dari web untuk jawaban ini":"Tautan yang disebut dalam jawaban";
-    pop.appendChild(heading);
-    sourceList.forEach((s,i)=>{
+    sourceList.forEach(s=>{
       const a=document.createElement("a");a.className="source-item";a.href=safeUrl(s.url);a.target="_blank";a.rel="noopener noreferrer";
+      a.title=s.url;
       a.appendChild(faviconImg(s.domain));
       const text=document.createElement("span");text.className="source-text";
-      const t=document.createElement("strong");t.textContent=`${i+1}. ${s.title||s.url}`;
-      const d=document.createElement("small");d.textContent=s.domain||s.url;
+      const t=document.createElement("strong");t.textContent=(s.title&&s.title!==s.url)?s.title:(s.domain||shortUrl(s.url));
+      const d=document.createElement("small");d.textContent=shortUrl(s.url);
       text.append(t,d);a.appendChild(text);
       pop.appendChild(a);
-      if(s.snippet){const p=document.createElement("p");p.className="source-snippet";p.textContent=s.snippet;pop.appendChild(p);}
     });
     row.appendChild(pop);
   });
