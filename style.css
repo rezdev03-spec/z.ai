@@ -560,3 +560,9 @@ html.is-typing .composer-wrap { bottom: calc(var(--keyboard-inset) + 8px) !impor
 @keyframes ascii-scan { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0 0 0 0); } }
 @media (prefers-reduced-motion: reduce) { .ascii-art { animation: none; } }
 .welcome { padding-top: clamp(24px, 6vh, 64px); }
+
+/* logo bulat */
+.brand-mark, .avatar-mark { border-radius: 50%; overflow: hidden; }
+.brand-glyph { stroke: none; }
+
+.sources-popover { scroll-margin-bottom: 200px; }

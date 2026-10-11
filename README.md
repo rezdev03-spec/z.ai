@@ -1,4 +1,4 @@
-# ZennNyx AI v9.17 — Workspace
+# ZennNyx AI v9.18 — Workspace
 
 Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model picker, full-screen website preview, KaTeX math, real web sources, and a 20-message daily quota (WIB).
 
@@ -21,6 +21,10 @@ Static HTML/CSS/JS client with Vercel serverless API. Crisp bordered UI, model p
 - `PUBLIC_APP_URL` (optional; OpenRouter attribution)
 
 API keys stay on the server.
+
+## v9.18 — what changed (logo bulat: `index.html`, `style.css`, file ikon)
+- **Logo baru yang bulat**: cincin orbit dengan celah, bulan sabit di tengah (Nyx = dewi malam), dan satu titik yang mengorbit (simpul AI). Bukan lingkaran-tiga-bola ala Ubuntu. Dipakai di header (kini dalam lingkaran), semua ikon website (`favicon.svg/.ico/-32.png`, `apple-touch-icon.png`, `icon-192/512.png`), dan art ASCII di layar awal. Semuanya dari satu definisi bentuk yang sama, jadi selalu selaras.
+- Art ASCII digambar ulang dari bentuk logo itu (bayangan lembut dengan karakter `. : - = + * # % @`), tulisan ZENN NYX dan garis `[ A I ]` tetap.
 
 ## v9.17 — what changed (`index.html`, `style.css`, `script.js`, + file ikon baru)
 - **Font**: jawaban/pesan kini **Merriweather** (serif klasik dengan huruf lebar dan tinggi-x besar, paling terbaca di layar HP), ukuran 16.5px, jarak baris 1.85. Teks dark sedikit diredam (#f4f4f4) supaya tidak "menyilaukan" di latar hitam murni. Ganti font cukup di satu tempat: variabel `--font-read` di `style.css` dan tautan Google Fonts di `index.html`.

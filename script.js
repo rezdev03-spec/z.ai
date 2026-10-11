@@ -446,6 +446,7 @@ function addAssistantActions(row, content, elapsedMs, usedThink, sources=[], web
       pop.appendChild(a);
     });
     row.appendChild(pop);
+    setTimeout(()=>pop.scrollIntoView({block:"nearest",behavior:"smooth"}),30); // supaya daftar tidak tertutup kotak ketik
   });
   source.dataset.sources="1";
   source.disabled=!sourceList.length;
