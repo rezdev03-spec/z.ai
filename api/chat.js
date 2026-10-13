@@ -1,21 +1,15 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { streamChatCompletion, describeStall } from "../lib/stream.js";
-import { getFreeChatModels, isFreeId, isNonChatModel } from "../lib/openrouter.js";
-import { GROQ_MODELS, GEMINI_MODELS, COMPAT_PROVIDERS, getCompatModels, listAvailableModels } from "../lib/models.js";
+import { TIERS, normalizeTier, PROVIDERS, providerBaseUrl, providerEnabled, anyProviderEnabled, modelsForTier, cleanKey, tiersForClient } from "../lib/models.js";
 
-const DAILY_LIMIT = 20;
-const COOLDOWN_MS = 5000;
+const clampInt = (v, d, min, max) => { const n = Math.floor(Number(v)); return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : d; };
+// Batas pesan per hari per browser (ganti lewat env DAILY_LIMIT tanpa edit kode). UI hanya menampilkan persentase + jam reset.
+const DAILY_LIMIT = clampInt(process.env.DAILY_LIMIT, 20, 1, 5000);
+const COOLDOWN_MS = 2000;
 const BURST_WINDOW_MS = 60 * 1000;
-const BURST_LIMIT = 3;
+const BURST_LIMIT = 6;
 const BURST_COOLDOWN_MS = 10 * 1000;
 const TOTAL_BUDGET_MS = 55 * 1000; // vercel.json: maxDuration 60
-
-const MAX_ATTEMPTS = 4; // model pertama + sampai 3 cadangan otomatis (lintas provider)
-const GROQ_ALLOWED = new Set(GROQ_MODELS.map(m => m.id));
-const GEMINI_ALLOWED = new Set(GEMINI_MODELS.map(m => m.id));
-
-const burstStore = globalThis.__zennnyxBurstStore || new Map();
-globalThis.__zennnyxBurstStore = burstStore;
 
 /* ───────────── Kuota harian (cookie bertanda tangan) ───────────── */
 
@@ -79,7 +73,7 @@ function readQuota(req) {
     const b = Buffer.from(expected);
     if (a.length !== b.length || !timingSafeEqual(a, b)) return emptyQuota();
     const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-    if (!decoded || decoded.v !== 1 || decoded.day !== jakartaDay() || !Number.isInteger(decoded.count) || decoded.count < 0 || decoded.count > DAILY_LIMIT) return emptyQuota();
+    if (!decoded || decoded.v !== 1 || decoded.day !== jakartaDay() || !Number.isInteger(decoded.count) || decoded.count < 0 || decoded.count > 100000) return emptyQuota();
     return {
       v: 1,
       day: decoded.day,
@@ -116,17 +110,17 @@ function takeDailyQuota(req, res) {
 
   if (quota.count >= DAILY_LIMIT) {
     res.setHeader("Retry-After", String(Math.max(1, Math.ceil((summary.resetAt - now) / 1000))));
-    return { ok: false, status: 429, error: "Jatah 20 pesan hari ini sudah habis. Besok bisa lanjut lagi.", quota: summary };
+    return { ok: false, status: 429, error: "You've reached today's usage limit.", limitReached: true, quota: summary };
   }
 
   if (quota.blockedUntil > now) {
     res.setHeader("Retry-After", String(Math.max(1, Math.ceil((quota.blockedUntil - now) / 1000))));
-    return { ok: false, status: 429, error: "Pelan-pelan dulu, bro. Tunggu sebentar sebelum mengirim pesan lagi.", quota: summary };
+    return { ok: false, status: 429, error: "Slow down a little, then try again in a few seconds.", quota: summary };
   }
 
   if (quota.lastAt && now - quota.lastAt < COOLDOWN_MS) {
     res.setHeader("Retry-After", String(Math.max(1, Math.ceil((COOLDOWN_MS - (now - quota.lastAt)) / 1000))));
-    return { ok: false, status: 429, error: "Tunggu sebentar sebelum mengirim pesan berikutnya.", quota: summary };
+    return { ok: false, status: 429, error: "Just a moment before the next message.", quota: summary };
   }
 
   const before = JSON.parse(JSON.stringify(quota)); // untuk dikembalikan kalau provider gagal
@@ -204,13 +198,15 @@ const CURRENT_INTENT = /\b(beli|buy|terbaik|best|rekomendasi|recommended|spesifi
 const QUESTION = /\b(apa itu|apa arti|apakah|apa|siapa|kapan|di ?mana|dimana|berapa|mengapa|kenapa|bagaimana|gimana|jelaskan|jelasin|what|who|when|where|why|which|how)\b/i;
 
 // mode: "auto" (default) | "on" (selalu cari) | "off"
-function shouldSearchWeb(query, { mode = "auto", hasImage = false, isFollowUp = false } = {}) {
+// policy (dari tingkat Effort): "explicit" = hanya kalau user minta mencari; "fresh" = + kata yang menandakan info terbaru; "auto" = semua heuristik.
+function shouldSearchWeb(query, { mode = "auto", hasImage = false, isFollowUp = false, policy = "auto" } = {}) {
   const q = String(query || "").toLowerCase().trim();
   if (!q || mode === "off") return false;
   if (CHITCHAT.test(q)) return false;
   if (mode === "on") return true;
   if (EXPLICIT_SEARCH.test(q)) return true;
-  if (hasImage) return false;
+  if (hasImage || policy === "explicit") return false;
+  if (policy === "fresh") return FRESH_SIGNAL.test(q) && !OFFLINE_TASK.test(q);
   if (OFFLINE_TASK.test(q)) return FRESH_SIGNAL.test(q);
   if (FRESH_SIGNAL.test(q)) return true;
   // Lanjutan berupa CERITA/PENDAPAT (bukan pertanyaan) mis. "di Douyin aku liat ada orang juara terus dibelikan iQOO 15":
@@ -245,9 +241,9 @@ function describeTavilyError(status, data) {
   return `${msg} (HTTP ${status})${detail ? `: ${detail}` : ""}`;
 }
 
-async function searchWeb(query, timeoutMs = 7000) {
+async function searchWeb(query, timeoutMs = 5000) {
   const key = process.env.TAVILY_API_KEY;
-  if (!key) return { used: false, sources: [], error: "TAVILY_API_KEY belum dipasang di Vercel." };
+  if (!key) return { used: false, sources: [], error: "TAVILY_API_KEY is not set." };
   const attempt = async config => {
     const response = await fetch("https://api.tavily.com/search", {
       method: "POST",
@@ -329,14 +325,19 @@ function buildContinuity(messages) {
 
 /* ───────────── Prompt ───────────── */
 
-function systemPrompt({ thinkHarder, currentDate, webSources, wantsWeb, wantsCode, continuity = "" }) {
+function systemPrompt({ tier, currentDate, webSources, wantsWeb, wantsCode, continuity = "" }) {
   const tone = `Kamu adalah ZennNyx AI, asisten personal yang cerdas dan enak diajak ngobrol. Balas dengan bahasa yang dipakai user. Untuk bahasa Indonesia, pakai bahasa sehari-hari yang natural, hangat, dan tidak kaku, seperti teman yang pintar, bukan customer service. Sesuaikan cara menyapa dengan user: pakai "gue/lu" HANYA kalau user sendiri memakainya di pesannya; kalau user memakai "aku/kamu" atau tidak memakai kata ganti, pakai "aku/kamu" atau hindari kata ganti sama sekali. Jangan memaksakan slang atau kata gaul; kalau ragu, pilih gaya netral yang santai dan sopan. Hindari "saya/Anda" kecuali user meminta formal. Jaga jawaban tetap jelas, jujur, dan berguna. Tanggal saat ini di WIB: ${currentDate}. Gunakan Markdown dengan benar.
 
 MATEMATIKA: tulis rumus dengan LaTeX. Inline: \\( ... \\). Rumus blok: \\[ ... \\]. Beberapa langkah yang sejajar ditaruh dalam SATU blok: \\[ \\begin{aligned} x_1 &= ... \\\\ x_2 &= ... \\end{aligned} \\]. Jangan pernah menaruh format Markdown (** _ \`) di dalam rumus; pakai x_1 atau x_{1} untuk subskrip. Jangan pakai tanda $ untuk rumus (bentrok dengan tanda uang). Jangan menulis perintah LaTeX seperti \\times atau \\frac sebagai teks polos di luar delimiter.
 
 Jangan mengarang sumber atau mengaku melakukan pencarian jika tidak ada hasil web saat ini. Jangan membuka chain-of-thought privat; berikan jawaban dan alasan ringkas yang berguna.`;
   const coding = wantsCode ? `\n\nMODE PEMBUATAN KODE: User mungkin meminta aplikasi atau website. Berikan kode yang lengkap dan benar-benar bisa dijalankan, bukan pseudo-code. Untuk website, utamakan SATU blok \`\`\`html berisi file HTML mandiri (CSS di <style>, JavaScript di <script>) karena hasilnya langsung ditampilkan sebagai pratinjau layar penuh. Jangan memecah jadi banyak file kecuali user memintanya. Kode HARUS lengkap sampai </html> dan tidak boleh terpotong: kalau fiturnya banyak, tulis ringkas dan efisien supaya muat. Wajib responsive (mobile dulu) dengan <meta name="viewport">, tidak bergantung pada file lokal; CDN publik boleh bila perlu. Jangan menulis placeholder untuk bagian inti. Jika user hanya bertanya atau ngobrol (bukan meminta perubahan kode), jawab biasa tanpa menulis ulang seluruh kode. Penjelasan setelah kode cukup singkat.` : "";
-  const thinking = thinkHarder ? `\n\nMODE THINK HARDER: Analisis kebutuhan dengan cermat dan jawab lebih mendalam serta terstruktur, tetapi tetap gunakan gaya bahasa santai yang sesuai user. Jangan bertele-tele tanpa manfaat.` : "";
+  const thinking = tier === "high"
+    ? `\n\nMODE TELITI: Analisis kebutuhan dengan cermat dan jawab lebih mendalam serta terstruktur, tetapi tetap gunakan gaya bahasa santai yang sesuai user. Jangan bertele-tele tanpa manfaat.`
+    : wantsCode ? ""
+    : tier === "fast" ? `\n\nMODE CEPAT: Jawab langsung ke intinya dan ringkas (biasanya di bawah 150 kata), tanpa pembukaan atau basa-basi. Beri detail hanya kalau user memintanya.`
+    : tier === "low" ? `\n\nMODE RINGKAS: Jawab jelas dan padat, tanpa bertele-tele.`
+    : "";
   const web = webSources.length
     ? `\n\nPENCARIAN WEB UNTUK PERTANYAAN TERAKHIR INI:\nGunakan sumber di bawah sebagai bukti untuk klaim faktual/aktual. Sumber ini hanya milik pertanyaan TERAKHIR, bukan seluruh percakapan. Jangan gunakan kembali sumber lama sebagai sumber pertanyaan baru. Beri penanda [1], [2], dst hanya untuk sumber yang tersedia di bawah. Bila tidak mendukung sebuah klaim, akui belum terverifikasi. Jika hasil pencarian tampak tidak berkaitan dengan topik percakapan sebelumnya (mis. judul atau nama yang berbeda), abaikan hasil itu, tetap lanjutkan topik yang sedang dibahas, dan katakan jujur bila infonya belum ditemukan.\n\n${formatSearchContext(webSources)}`
     : wantsWeb ? "\n\nUser membutuhkan fakta yang mungkin aktual, tetapi pencarian web tidak menghasilkan sumber. Jangan berpura-pura sudah mencari; jelaskan keterbatasan/ketidakpastian." : "";
@@ -349,17 +350,18 @@ function modelIdentity(model) {
   return `\n\nIDENTITAS MODEL AKTIF: ${shortModelName} (ID model: ${rawModelId}). ZennNyx AI adalah nama aplikasi/asisten, bukan klaim bahwa model dasarnya dikembangkan oleh ZennNyx. Jika user bertanya model apa yang dipakai, jawab jujur dengan menyebut model aktif tersebut. Jangan mengarang identitas atau mengaku sebagai model buatan ZennNyx.`;
 }
 
+
 /* ───────────── Util pesan ───────────── */
 
 function normalizeMessages(incoming) {
   return (Array.isArray(incoming) ? incoming : []).filter(m => m && (m.role === "user" || m.role === "assistant")).slice(-18).map(m => {
     if (typeof m.content === "string") {
-      return { role: m.role, content: m.content.slice(0, m.role === "assistant" ? 14000 : 8000) };
+      return { role: m.role, content: m.content.slice(0, m.role === "assistant" ? 14000 : 24000) };
     }
     if (m.role === "user" && Array.isArray(m.content)) {
       const content = m.content.filter(part => {
         if (!part || typeof part !== "object") return false;
-        if (part.type === "text") return typeof part.text === "string" && part.text.length <= 8000;
+        if (part.type === "text") return typeof part.text === "string" && part.text.length <= 24000;
         if (part.type === "image_url") return typeof part.image_url?.url === "string" && /^data:image\/(jpeg|jpg|png|webp|gif);base64,/i.test(part.image_url.url);
         return false;
       }).slice(0, 2);
@@ -369,50 +371,38 @@ function normalizeMessages(incoming) {
   }).filter(Boolean);
 }
 
-function parseChoice(choice) {
-  const raw = typeof choice === "string" ? choice : "";
-  const parts = raw.split("::");
-  if (parts.length !== 2) return null;
-  return { provider: parts[0], model: parts[1] };
-}
-
-function textFromOpenAIResponse(data) {
-  const content = data?.choices?.[0]?.message?.content;
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) return content.map(p => typeof p?.text === "string" ? p.text : "").join("");
-  return "";
-}
-
 // Beberapa model menyelipkan proses berpikir di dalam <think>…</think>; itu tidak untuk ditampilkan.
-function stripThinking(text) {
-  return String(text || "")
-    .replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi, "")
-    .replace(/^\s*<(think|thinking|reasoning)>[\s\S]*$/i, "")
-    .trim();
-}
-
-function isBase64Image(url) {
-  const match = String(url || "").match(/^data:(image\/(?:jpeg|jpg|png|webp|gif));base64,([\s\S]+)$/i);
-  return match ? { mimeType: match[1].toLowerCase(), data: match[2] } : null;
-}
-
-function toGeminiContents(messages) {
-  return messages.map(message => {
-    const role = message.role === "assistant" ? "model" : "user";
-    const parts = [];
-    if (typeof message.content === "string") {
-      parts.push({ text: message.content });
-    } else if (Array.isArray(message.content)) {
-      for (const item of message.content) {
-        if (item?.type === "text" && typeof item.text === "string") parts.push({ text: item.text });
-        if (item?.type === "image_url") {
-          const image = isBase64Image(item.image_url?.url);
-          if (image) parts.push({ inlineData: { mimeType: image.mimeType, data: image.data } });
-        }
+// Filter ini bekerja per potongan (streaming) dan menahan potongan tag yang terbelah di antara dua chunk.
+class ThinkFilter {
+  constructor() { this.buf = ""; this.close = null; }
+  push(chunk) {
+    this.buf += chunk;
+    let out = "";
+    for (;;) {
+      if (this.close) {
+        const idx = this.buf.toLowerCase().indexOf(this.close);
+        if (idx < 0) { this.buf = this.buf.slice(-(this.close.length - 1)); return out; }
+        this.buf = this.buf.slice(idx + this.close.length);
+        this.close = null;
+        continue;
       }
+      const m = this.buf.match(/<(think|thinking|reasoning)>/i);
+      if (m) {
+        out += this.buf.slice(0, m.index);
+        this.buf = this.buf.slice(m.index + m[0].length);
+        this.close = `</${m[1].toLowerCase()}>`;
+        continue;
+      }
+      // tahan ekor yang mungkin awal sebuah tag pembuka ("<thi")
+      const lt = this.buf.lastIndexOf("<");
+      if (lt >= 0 && this.buf.length - lt < 11 && /^<\/?[a-z]*$/i.test(this.buf.slice(lt)) && ["<think>", "<thinking>", "<reasoning>"].some(t => t.startsWith(this.buf.slice(lt).toLowerCase()))) {
+        out += this.buf.slice(0, lt);
+        this.buf = this.buf.slice(lt);
+      } else { out += this.buf; this.buf = ""; }
+      return out;
     }
-    return { role, parts };
-  }).filter(m => m.parts.length > 0);
+  }
+  flush() { const rest = this.close ? "" : this.buf; this.buf = ""; return rest; }
 }
 
 // Model yang menolak role "system"/"developer" (mis. Gemma): sisipkan instruksi ke pesan user pertama.
@@ -441,7 +431,7 @@ class UpstreamError extends Error {
     this.status = status;
     this.upstreamStatus = upstreamStatus;
     this.detail = detail;
-    this.fatal = fatal;           // percuma coba model lain (API key salah, kuota harian habis, dst.)
+    this.fatal = fatal;           // percuma coba model lain dari provider yang sama (API key salah, kuota harian habis, dst.)
     this.globalLimit = globalLimit;
   }
 }
@@ -451,6 +441,7 @@ function cleanDetail(text) {
 }
 
 function upstreamMessage(data) {
+  if (Array.isArray(data)) data = data[0]; // Gemini kadang membungkus error dalam array
   const e = data?.error;
   const parts = [];
   if (typeof e === "string") parts.push(e);
@@ -459,208 +450,81 @@ function upstreamMessage(data) {
   if (typeof raw === "string") parts.push(raw);
   else if (typeof raw?.error?.message === "string") parts.push(raw.error.message);
   if (typeof data?.message === "string") parts.push(data.message);
+  if (typeof data?.detail === "string") parts.push(data.detail);
   return cleanDetail([...new Set(parts.filter(Boolean))].join(" — "));
 }
 
 function upstreamFail(label, status, data) {
   const detail = upstreamMessage(data);
   let message, httpStatus = 502, fatal = false, globalLimit = false;
-  if (status === 401 || status === 403) { message = `${label}: API key ditolak atau tidak punya akses ke model ini.`; fatal = true; }
-  else if (status === 402) { message = `${label}: kredit/saldo tidak cukup untuk model ini.`; fatal = true; }
-  else if (status === 410) message = `${label}: model ini sudah dihentikan provider (end of life). Ganti daftar modelnya lewat env ${label.toUpperCase()}_MODELS di Vercel.`;
-  else if (status === 404) message = `${label}: model tidak ditemukan atau sedang tidak punya endpoint aktif.`;
-  else if (status === 408 || status === 504) { message = `${label}: respons terlalu lama.`; httpStatus = 504; }
+  if (status === 401 || status === 403) { message = `${label}: API key rejected or no access to this model.`; fatal = true; }
+  else if (status === 402) { message = `${label}: not enough credit for this model.`; fatal = true; }
+  else if (status === 410) message = `${label}: this model has been retired by the provider.`;
+  else if (status === 404) message = `${label}: model not found or has no active endpoint.`;
+  else if (status === 408 || status === 504) { message = `${label}: the model took too long to respond.`; httpStatus = 504; }
   else if (status === 429) {
     httpStatus = 429;
     if (label === "OpenRouter" && /free-models-per-day/i.test(detail)) {
-      message = "OpenRouter: kuota harian SEMUA model gratis habis (batas akun tanpa top-up). Reset sekitar 07:00 WIB; top up kredit ≥ $10 di OpenRouter untuk jatah 1000 pesan/hari, atau pakai model Groq/Gemini dulu.";
+      message = "OpenRouter: the daily limit for all free models is used up (resets around 07:00 WIB). Adding $10 of credit raises it.";
       fatal = true; globalLimit = true;
     } else if (label === "OpenRouter" && /free-models-per-min/i.test(detail)) {
-      message = "OpenRouter: terlalu banyak permintaan ke model gratis dalam 1 menit. Tunggu sekitar semenit lalu kirim ulang.";
+      message = "OpenRouter: too many free-model requests in one minute. Wait a minute and try again.";
       globalLimit = true;
-    } else if (/per[- ]day|\bRPD\b|\bTPD\b|daily/i.test(detail)) message = `${label}: kuota harian model ini sudah habis. Coba model lain atau tunggu reset.`;
-    else message = `${label}: limit pemakaian model ini tercapai. Coba lagi sebentar atau ganti model.`;
+    } else message = `${label}: rate limit reached for this model.`;
   }
-  else if (status >= 500) message = `${label}: server provider sedang bermasalah.`;
-  else message = `${label}: permintaan ditolak (HTTP ${status}).`;
+  else if (status >= 500) message = `${label}: the provider is having problems.`;
+  else message = `${label}: request rejected (HTTP ${status}).`;
   if (detail && !fatal) message += ` (${detail})`;
   return new UpstreamError(message, { status: httpStatus, upstreamStatus: status, detail, fatal, globalLimit });
 }
 
-async function postJson(label, url, headers, body, timeoutMs) {
-  let response;
-  try {
-    response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...headers },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs)
-    });
-  } catch (error) {
-    const timeout = error?.name === "TimeoutError" || error?.name === "AbortError";
-    throw new UpstreamError(
-      timeout ? `${label}: respons terlalu lama (lebih dari ${Math.round(timeoutMs / 1000)} detik).` : `${label}: gagal tersambung ke server provider.`,
-      { status: timeout ? 504 : 502 }
-    );
-  }
-  const data = await response.json().catch(() => ({}));
-  return { response, data };
-}
-
 function makeDeadline(startedAt, total = TOTAL_BUDGET_MS) {
-  return {
-    left: () => total - (Date.now() - startedAt),
-    timeout(cap) {
-      const left = total - (Date.now() - startedAt) - 1200;
-      if (left < 3000) throw new UpstreamError("Waktu proses habis sebelum model sempat menjawab. Coba lagi atau pilih model yang lebih cepat.", { status: 504 });
-      return Math.min(cap, left);
-    }
-  };
+  return { left: () => total - (Date.now() - startedAt) };
 }
 
-/* ───────────── Provider ───────────── */
+/* ───────────── Pemanggilan model (streaming, OpenAI-compatible) ───────────── */
 
-const tokenBudget = {
-  compat: (o, reasoning) => reasoning ? (o.wantsCode ? 12288 : o.thinkHarder ? 8192 : 6144) : (o.wantsCode ? 8192 : o.thinkHarder ? 6144 : 4096),
-  groq: o => (o.wantsCode ? 8192 : o.thinkHarder ? 6144 : 4096),
-  gemini: o => (o.wantsCode ? 16384 : o.thinkHarder ? 8192 : 4096),
-  openrouter: o => (o.wantsCode ? 6144 : o.thinkHarder ? 5000 : 4096)
-};
-
-// Key yang ditempel dari HP sering membawa spasi/baris baru/tanda kutip/awalan "Bearer": header jadi tidak valid
-// dan request gagal sebelum sampai ke provider. Bersihkan dulu.
-function cleanKey(value) {
-  return String(value || "").trim().replace(/^["']+|["']+$/g, "").replace(/^Bearer\s+/i, "").trim();
-}
-
-// Provider OpenAI-compatible (Mistral, NVIDIA NIM, ...): konfigurasinya ada di COMPAT_PROVIDERS (lib/models.js).
-async function callCompat(candidate, messages, prompt, opts, deadline) {
-  const { provider, id: model } = candidate;
-  const cfg = COMPAT_PROVIDERS[provider];
-  const total = deadline.timeout(opts.attemptCap);
-  // Streaming: kita tahu apakah request diterima, kapan token pertama datang, dan apakah macet di tengah jalan.
-  const r = await streamChatCompletion({
-    url: `${cfg.baseUrl}/chat/completions`,
-    headers: { Authorization: `Bearer ${cleanKey(process.env[cfg.env])}` },
-    body: {
-      model,
-      messages: [{ role: "system", content: prompt }, ...messages],
-      max_tokens: tokenBudget.compat(opts, candidate.reasoning),
-      temperature: opts.thinkHarder ? 0.55 : 0.7
-    },
-    firstByteMs: Math.min(20000, total),
-    firstTokenMs: Math.min(30000, total),
-    idleMs: 15000,
-    totalMs: total
-  });
-  if (r.errorData) {
-    const status = r.status && r.status !== 200 ? r.status : 502;
-    console.error(`${cfg.label} error:`, model, status, upstreamMessage(r.errorData));
-    throw upstreamFail(cfg.label, status, r.errorData);
+// NVIDIA NIM dan OpenRouter sama-sama OpenAI-compatible, jadi satu fungsi melayani keduanya.
+async function streamModel(model, messages, prompt, ctx, hooks) {
+  const cfg = PROVIDERS[model.provider];
+  const headers = { Authorization: `Bearer ${cleanKey(process.env[cfg.env])}` };
+  if (model.provider === "openrouter") {
+    headers["X-Title"] = "ZennNyx AI";
+    if (process.env.PUBLIC_APP_URL) headers["HTTP-Referer"] = process.env.PUBLIC_APP_URL;
   }
-  const text = stripThinking(r.text);
-  if (r.abort || r.networkError) {
-    console.error(`${cfg.label} stream:`, model, r.abort || r.networkError, `headers=${r.headersMs}ms ttft=${r.ttftMs}ms total=${r.totalMs}ms reasoning=${r.reasoningChars}`);
-    // Sudah ada jawaban sebagian: lebih baik tampilkan daripada ganti model dan mulai dari nol.
-    if ((r.abort === "deadline" || r.abort === "stalled") && text.length > 40) return `${text}\n\n_(Jawaban terpotong: ${cfg.label} belum selesai saat batas waktu server.)_`;
-    throw new UpstreamError(describeStall(cfg.label, r), { status: 504 });
-  }
-  if (!text) {
-    const why = r.finish === "length" ? " (token habis dipakai untuk berpikir)" : "";
-    throw new UpstreamError(`${cfg.label}: model mengembalikan jawaban kosong${why}. Coba kirim ulang.`, { status: 502 });
-  }
-  return text;
-}
-
-async function callGroq(model, messages, prompt, opts, deadline) {
-  const { response, data } = await postJson("Groq", "https://api.groq.com/openai/v1/chat/completions",
-    { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
-    {
-      model,
-      messages: [{ role: "system", content: prompt }, ...messages],
-      max_completion_tokens: tokenBudget.groq(opts),
-      temperature: opts.thinkHarder ? 0.55 : 0.7
-    },
-    deadline.timeout(opts.attemptCap));
-  if (!response.ok) { console.error("Groq error:", response.status, upstreamMessage(data)); throw upstreamFail("Groq", response.status, data); }
-  const reply = stripThinking(textFromOpenAIResponse(data));
-  if (!reply) throw new UpstreamError("Groq: model mengembalikan jawaban kosong. Coba kirim ulang.", { status: 502 });
-  return reply;
-}
-
-async function callGemini(model, messages, prompt, opts, deadline) {
-  const { response, data } = await postJson("Gemini",
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(process.env.GEMINI_API_KEY)}`,
-    {},
-    {
-      systemInstruction: { parts: [{ text: prompt }] },
-      contents: toGeminiContents(messages),
-      generationConfig: { maxOutputTokens: tokenBudget.gemini(opts) }
-    },
-    deadline.timeout(opts.attemptCap));
-  if (!response.ok) { console.error("Gemini error:", response.status, upstreamMessage(data)); throw upstreamFail("Gemini", response.status, data); }
-  if (data?.promptFeedback?.blockReason) {
-    throw new UpstreamError(`Gemini menolak pesan ini (${data.promptFeedback.blockReason}). Coba ubah kalimatnya.`, { status: 502, fatal: true });
-  }
-  const reply = stripThinking((data?.candidates?.[0]?.content?.parts || []).map(p => typeof p.text === "string" ? p.text : "").join(""));
-  if (!reply) {
-    const why = data?.candidates?.[0]?.finishReason;
-    throw new UpstreamError(`Gemini mengembalikan jawaban kosong${why ? ` (${why})` : ""}. Coba kirim ulang.`, { status: 502 });
-  }
-  return reply;
-}
-
-async function callOpenRouterOnce(model, messages, promptFor, opts, variant, deadline) {
-  const prompt = promptFor(model);
-  const body = {
-    model,
-    messages: variant.fold ? foldSystemIntoUser(messages, prompt) : [{ role: "system", content: prompt }, ...messages],
-    max_tokens: variant.maxTokens,
-    temperature: opts.thinkHarder ? 0.55 : 0.7
-  };
-  if (variant.reasoning) body.reasoning = { effort: opts.thinkHarder ? "medium" : "low", exclude: true };
-  const { response, data } = await postJson("OpenRouter", "https://openrouter.ai/api/v1/chat/completions", {
-    Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-    "X-Title": "ZennNyx AI",
-    ...(process.env.PUBLIC_APP_URL ? { "HTTP-Referer": process.env.PUBLIC_APP_URL } : {})
-  }, body, deadline.timeout(opts.attemptCap));
-
-  // OpenRouter sering membalas HTTP 200 dengan isi {error:{…}} saat provider upstream gagal.
-  const embeddedError = data?.error || data?.choices?.[0]?.error;
-  if (!response.ok || embeddedError) {
-    const status = response.ok ? Number(embeddedError?.code) || 502 : response.status;
-    const errorBody = { error: embeddedError || data?.error };
-    console.error("OpenRouter error:", model, status, upstreamMessage(errorBody));
-    throw upstreamFail("OpenRouter", status, errorBody);
-  }
-  const choice = data?.choices?.[0];
-  const reply = stripThinking(textFromOpenAIResponse(data));
-  if (!reply) {
-    const why = choice?.finish_reason === "length" ? " (token habis dipakai untuk berpikir)" : "";
-    throw new UpstreamError(`OpenRouter: model ${model.split("/").pop().replace(/:free$/, "")} mengembalikan jawaban kosong${why}.`, { status: 502 });
-  }
-  return reply;
-}
-
-async function callOpenRouterModel(model, messages, promptFor, opts, deadline) {
-  let variant = { fold: /gemma/i.test(model), reasoning: true, maxTokens: tokenBudget.openrouter(opts) };
+  // Model "berpikir" memakai token untuk berpikir juga, jadi beri ruang tambahan supaya jawabannya tidak kosong.
+  const maxTokens = ctx.maxTokens + (model.reasoning ? 3072 : 0);
+  let variant = { fold: model.provider === "openrouter" && /gemma/i.test(model.id), reasoning: model.provider === "openrouter" };
   for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      return await callOpenRouterOnce(model, messages, promptFor, opts, variant, deadline);
-    } catch (error) {
-      if (!(error instanceof UpstreamError) || error.upstreamStatus !== 400 || attempt === 2) throw error;
-      const detail = error.detail || "";
-      if (!variant.fold && /developer instruction|system (instruction|prompt|message|role)|instruction is not enabled|role/i.test(detail)) {
-        variant = { ...variant, fold: true };
-      } else if (variant.reasoning || variant.maxTokens > 4096) {
-        variant = { ...variant, reasoning: false, maxTokens: Math.min(variant.maxTokens, 4096) };
-      } else throw error;
+    const body = {
+      model: model.id,
+      messages: variant.fold ? foldSystemIntoUser(messages, prompt) : [{ role: "system", content: prompt }, ...messages],
+      max_tokens: maxTokens,
+      temperature: ctx.temperature
+    };
+    if (variant.reasoning) body.reasoning = { effort: ctx.tierId === "high" ? "medium" : "low", exclude: true };
+    const r = await streamChatCompletion({
+      url: `${providerBaseUrl(model.provider)}/chat/completions`, headers, body,
+      firstByteMs: hooks.firstTokenMs, firstTokenMs: hooks.firstTokenMs, idleMs: 15000, totalMs: hooks.totalMs,
+      signal: hooks.signal, onText: hooks.onText
+    });
+    if (r.errorData) {
+      const status = r.status && r.status !== 200 ? r.status : 502;
+      const err = upstreamFail(cfg.label, status, r.errorData);
+      console.error(`${cfg.label} error:`, model.id, status, upstreamMessage(r.errorData));
+      // OpenRouter: sebagian model menolak role system atau parameter reasoning -> ulangi sekali dengan penyesuaian.
+      if (status === 400 && attempt < 2 && !hooks.started()) {
+        if (!variant.fold && /developer instruction|system (instruction|prompt|message|role)|instruction is not enabled|role/i.test(err.detail)) { variant = { ...variant, fold: true }; continue; }
+        if (variant.reasoning) { variant = { ...variant, reasoning: false }; continue; }
+      }
+      throw err;
     }
+    return r;
   }
-  throw new UpstreamError("OpenRouter: gagal memproses permintaan.", { status: 502 });
+  throw new UpstreamError(`${cfg.label}: could not process the request.`, { status: 502 });
 }
 
-/* ───────────── Kelancaran model + pemilihan otomatis ───────────── */
+/* ───────────── Kelancaran model + urutan ───────────── */
 
 const HEALTH_WINDOW_MS = 15 * 60 * 1000;
 const serverHealth = globalThis.__zennnyxHealth || new Map();
@@ -672,13 +536,14 @@ const num = (v, min, max) => Math.min(max, Math.max(min, Number(v) || 0));
 function sanitizeClientHealth(raw) {
   const out = {};
   if (!raw || typeof raw !== "object") return out;
-  for (const [key, v] of Object.entries(raw).slice(0, 60)) {
-    if (!/^(groq|gemini|openrouter|mistral|nvidia)::[\w.:/-]{1,140}$/.test(key) || !v || typeof v !== "object") continue;
+  for (const [key, v] of Object.entries(raw).slice(0, 80)) {
+    if (!/^(nvidia|openrouter|groq|gemini)::[\w.:/-]{1,140}$/.test(key) || !v || typeof v !== "object") continue;
     out[key] = { streak: num(v.streak, 0, 10), lastFailAt: num(v.lastFailAt, 0, Date.now()), ms: num(v.ms, 0, 60000), ok: num(v.ok, 0, 1000) };
   }
   return out;
 }
 
+// `ms` = waktu sampai token pertama yang terlihat (bukan total), supaya ranking benar-benar mengejar yang paling cepat mulai menjawab.
 function recordHealth(value, ok, ms) {
   const h = serverHealth.get(value) || { streak: 0, lastFailAt: 0, ms: 0, ok: 0 };
   if (ok) { h.streak = 0; h.ok = Math.min(1000, h.ok + 1); h.ms = h.ms ? h.ms * 0.6 + ms * 0.4 : ms; }
@@ -686,86 +551,159 @@ function recordHealth(value, ok, ms) {
   serverHealth.set(value, h);
 }
 
+function healthOf(model, clientHealth) { return clientHealth[model.value] || serverHealth.get(model.value); }
+function isRecentlyFailing(model, clientHealth) {
+  const h = healthOf(model, clientHealth);
+  return Boolean(h && h.streak && Date.now() - (h.lastFailAt || 0) < HEALTH_WINDOW_MS);
+}
+
 // Makin tinggi makin diutamakan: nilai awal - hukuman gagal (memudar 15 menit) - hukuman lambat + bonus sering sukses.
-function scoreModel(model, clientHealth) {
-  const h = clientHealth[model.value] || serverHealth.get(model.value);
+function scoreModel(model, clientHealth, tierId) {
+  const h = healthOf(model, clientHealth);
   let score = model.prior || 50;
   if (h) {
     const age = Date.now() - (h.lastFailAt || 0);
     if (h.streak && age < HEALTH_WINDOW_MS) score -= Math.min(70, h.streak * 28) * (1 - age / HEALTH_WINDOW_MS);
-    if (h.ms) score -= Math.min(25, h.ms / 400);
+    if (h.ms) score -= Math.min(25, h.ms / (tierId === "fast" ? 200 : 400));
     if (h.ok) score += Math.min(4, h.ok * 0.4);
   }
   return score;
 }
 
-// Urutan percobaan: pilihan user (kalau bukan "auto") dulu, lalu semua model lain dari yang paling lancar.
-// Model "lengket": di mode Otomatis, model yang menjawab giliran sebelumnya dipakai lagi selama masih sehat, supaya gaya,
-// pemahaman konteks, dan nada jawaban tidak berubah-ubah tiap pesan. Kalau baru gagal, ranking biasa yang menentukan.
-function isRecentlyFailing(model, clientHealth) {
-  const h = clientHealth[model.value] || serverHealth.get(model.value);
-  return Boolean(h && h.streak && Date.now() - (h.lastFailAt || 0) < HEALTH_WINDOW_MS);
-}
-
-function buildChain(choice, available, hasImage, clientHealth, stickyValue = "") {
-  const usable = available.filter(m => !hasImage || m.vision);
-  const ranked = [...usable].sort((a, b) => scoreModel(b, clientHealth) - scoreModel(a, clientHealth));
+// "Model lengket": model yang menjawab giliran sebelumnya dipakai lagi (kalau masih sehat dan ada di tingkat ini),
+// supaya gaya dan pemahaman konteks tidak berubah-ubah tiap pesan.
+function buildChain(candidates, clientHealth, tierId, stickyValue = "") {
+  const ranked = [...candidates].sort((a, b) => scoreModel(b, clientHealth, tierId) - scoreModel(a, clientHealth, tierId));
   const chain = [];
-  if (choice.provider === "auto" && stickyValue) {
-    const sticky = usable.find(m => m.value === stickyValue);
-    if (sticky && !isRecentlyFailing(sticky, clientHealth)) chain.push(sticky);
-  }
-  if (choice.provider !== "auto") {
-    const value = `${choice.provider}::${choice.model}`;
-    const known = available.find(m => m.value === value) || { provider: choice.provider, id: choice.model, value, vision: false, prior: 50 };
-    if (!hasImage || known.vision) chain.push(known);
-  }
+  const sticky = stickyValue && candidates.find(m => m.value === stickyValue);
+  if (sticky && !isRecentlyFailing(sticky, clientHealth)) chain.push(sticky);
   for (const m of ranked) if (!chain.some(c => c.value === m.value)) chain.push(m);
   return chain;
 }
 
-function callCandidate(model, messages, promptFor, opts, deadline) {
-  if (COMPAT_PROVIDERS[model.provider]) return callCompat(model, messages, promptFor(model.id), opts, deadline);
-  if (model.provider === "groq") return callGroq(model.id, messages, promptFor(model.id), opts, deadline);
-  if (model.provider === "gemini") return callGemini(model.id, messages, promptFor(model.id), opts, deadline);
-  return callOpenRouterModel(model.id, messages, promptFor, opts, deadline);
+/* ───────────── Balapan model (hedged requests) ─────────────
+   Model terbaik dicoba dulu. Kalau belum ada token setelah `hedgeMs`, model berikutnya dijalankan PARALEL dan
+   siapa pun yang mengeluarkan token pertama menang (yang lain dibatalkan). Model yang error langsung diganti
+   tanpa menunggu. Setelah ada pemenang, token langsung dialirkan ke browser lewat `sink`. */
+function raceModels({ chain, messages, promptFor, ctx, deadline, signal, sink }) {
+  const tier = ctx.tier;
+  return new Promise((resolve, reject) => {
+    const pending = [...chain];
+    const running = new Map();
+    const attempts = [];
+    const penalized = new Set();
+    let winner = null, firstError = null, firstFailed = null, started = 0, settled = false;
+    let hedgeTimer = null, deadlineTimer = null;
+
+    const abortAll = except => { for (const h of running.values()) if (h !== except) { h.cancelled = true; h.ctrl.abort(); } };
+    const cleanup = () => { clearTimeout(hedgeTimer); clearTimeout(deadlineTimer); signal?.removeEventListener("abort", onClientAbort); };
+    const finish = fn => { if (settled) return; settled = true; cleanup(); abortAll(null); fn(); };
+    const fail = () => finish(() => {
+      const base = firstError || new UpstreamError("No model could answer right now. Try again in a moment.", { status: 503 });
+      const err = new UpstreamError(attempts.length > 1 ? `${base.message} Tried ${attempts.length} models.` : base.message, { status: base.status });
+      err.attempts = attempts;
+      reject(err);
+    });
+    function onClientAbort() { finish(() => { const e = new Error("aborted"); e.aborted = true; e.attempts = attempts; reject(e); }); }
+    if (signal) { if (signal.aborted) return onClientAbort(); signal.addEventListener("abort", onClientAbort, { once: true }); }
+
+    const nextCandidate = () => {
+      let i = pending.findIndex(m => !penalized.has(m.provider));
+      if (i < 0) i = pending.length ? 0 : -1;
+      return i < 0 ? null : pending.splice(i, 1)[0];
+    };
+    const launch = () => {
+      if (settled || winner || started >= tier.maxAttempts) return false;
+      if (started && deadline.left() < 5000) return false;
+      const model = nextCandidate();
+      if (!model) return false;
+      started++;
+      run(model);
+      armHedge();
+      return true;
+    };
+    function armHedge() {
+      clearTimeout(hedgeTimer);
+      if (settled || winner) return;
+      hedgeTimer = setTimeout(() => {
+        if (settled || winner) return;
+        if (running.size < 3 && launch()) return;
+        armHedge();
+      }, tier.hedgeMs);
+    }
+
+    const emitVisible = (h, vis) => {
+      if (!vis || settled || (winner && winner !== h)) return;
+      if (!winner) {
+        winner = h;
+        h.ttft = Date.now() - h.t0;
+        clearTimeout(hedgeTimer);
+        abortAll(h);
+        sink.start({ model: h.model, fallbackFrom: firstFailed?.id, fallbackReason: firstError ? String(firstError.message || "").slice(0, 300) : undefined });
+      }
+      h.text += vis;
+      sink.delta(vis);
+    };
+
+    const onEnd = (h, r) => {
+      running.delete(h.model.value);
+      if (settled || h.cancelled || (winner && winner !== h)) return;
+      emitVisible(h, h.filter.flush());
+      if (h === winner) {
+        const partial = Boolean(r.abort || r.networkError);
+        recordHealth(h.model.value, true, h.ttft);
+        attempts.push({ value: h.model.value, ok: true, ms: h.ttft });
+        finish(() => resolve({ reply: h.text, model: h.model, attempts, truncated: partial || r.finish === "length", firstError, firstFailed }));
+        return;
+      }
+      if (r.abort || r.networkError) return onFail(h, new UpstreamError(describeStall(PROVIDERS[h.model.provider].label, r), { status: 504 }));
+      const why = r.finish === "length" ? " (token budget used up while thinking)" : "";
+      onFail(h, new UpstreamError(`${PROVIDERS[h.model.provider].label}: the model returned an empty answer${why}.`, { status: 502 }));
+    };
+
+    function onFail(h, err) {
+      running.delete(h.model.value);
+      if (settled || h.cancelled || (winner && winner !== h)) return;
+      const error = err instanceof UpstreamError ? err : new UpstreamError("Unexpected error while calling the model.", { status: 500 });
+      if (!(err instanceof UpstreamError)) console.error("model call crashed:", h.model.value, err);
+      if (h === winner) { // gagal di tengah jawaban: tampilkan yang sudah ada sebagai jawaban terpotong
+        recordHealth(h.model.value, true, h.ttft);
+        attempts.push({ value: h.model.value, ok: true, ms: h.ttft });
+        finish(() => resolve({ reply: h.text, model: h.model, attempts, truncated: true, firstError, firstFailed }));
+        return;
+      }
+      recordHealth(h.model.value, false, Date.now() - h.t0);
+      attempts.push({ value: h.model.value, ok: false, ms: Date.now() - h.t0 });
+      if (!firstError) { firstError = error; firstFailed = h.model; }
+      if (error.status === 429) penalized.add(h.model.provider);
+      if (error.fatal || error.globalLimit) for (let i = pending.length - 1; i >= 0; i--) if (pending[i].provider === h.model.provider) pending.splice(i, 1);
+      if (!launch() && running.size === 0) fail();
+    }
+
+    function run(model) {
+      const h = { model, ctrl: new AbortController(), t0: Date.now(), filter: new ThinkFilter(), text: "", ttft: null, cancelled: false };
+      running.set(model.value, h);
+      const wait = Math.min(tier.firstTokenMs, Math.max(4000, deadline.left() - 1500));
+      streamModel(model, messages, promptFor(model), ctx, {
+        signal: h.ctrl.signal, firstTokenMs: wait, totalMs: Math.max(5000, deadline.left() - 1200),
+        started: () => h.text.length > 0,
+        onText: chunk => emitVisible(h, h.filter.push(chunk))
+      }).then(r => onEnd(h, r), err => onFail(h, err));
+    }
+
+    deadlineTimer = setTimeout(() => {
+      if (winner) { const w = winner; finish(() => resolve({ reply: w.text, model: w.model, attempts: [...attempts, { value: w.model.value, ok: true, ms: w.ttft }], truncated: true, firstError, firstFailed })); }
+      else { firstError = firstError || new UpstreamError("Ran out of time before a model answered. Try Fast or Low effort.", { status: 504 }); fail(); }
+    }, Math.max(3000, deadline.left() - 800));
+
+    if (!launch()) fail();
+  });
 }
 
-// Coba model satu per satu. Error APAPUN (limit, 5xx, timeout, kosong, key salah di satu provider) = lanjut ke model berikutnya.
-async function runWithAutoSwitch(chain, messages, promptFor, opts, deadline) {
-  const attempts = [];
-  const skipProviders = new Set();
-  let firstError = null;
-  for (const model of chain) {
-    if (attempts.length >= MAX_ATTEMPTS) break;
-    if (skipProviders.has(model.provider)) continue;
-    if (attempts.length && deadline.left() < 7000) break;
-    const n = attempts.length;
-    opts.attemptCap = opts.wantsCode ? [44000, 22000, 18000, 18000][n] : [20000, 14000, 12000, 12000][n];
-    if (model.slow) opts.attemptCap = Math.max(opts.attemptCap, 38000); // model reasoning besar: beri waktu lebih sebelum dianggap gagal
-    const t0 = Date.now();
-    try {
-      const reply = await callCandidate(model, messages, promptFor, opts, deadline);
-      const ms = Date.now() - t0;
-      recordHealth(model.value, true, ms);
-      attempts.push({ value: model.value, ok: true, ms });
-      return { reply, model, attempts, firstError };
-    } catch (raw) {
-      const error = raw instanceof UpstreamError ? raw : new UpstreamError("Kesalahan tak terduga saat memanggil model.", { status: 500 });
-      if (!(raw instanceof UpstreamError)) console.error("model call crashed:", model.value, raw);
-      recordHealth(model.value, false, Date.now() - t0);
-      attempts.push({ value: model.value, ok: false, ms: Date.now() - t0 });
-      if (!firstError) firstError = error;
-      if (error.fatal || error.globalLimit) skipProviders.add(model.provider); // key salah / kuota provider habis: provider lain masih boleh
-    }
-  }
-  const err = firstError || new UpstreamError("Tidak ada model aktif yang cocok untuk permintaan ini (mis. butuh model yang bisa membaca gambar).", { status: 503 });
-  if (attempts.length > 1) err.message += ` Sudah otomatis mencoba ${attempts.length} model, semuanya gagal.`;
-  err.attempts = attempts;
-  throw err;
-}
 
 /* ───────────── Handler ───────────── */
+
+const providerFlags = () => ({ nvidia: providerEnabled("nvidia"), openrouter: providerEnabled("openrouter"), groq: providerEnabled("groq"), gemini: providerEnabled("gemini"), webSearch: Boolean(process.env.TAVILY_API_KEY) });
 
 export default async function handler(req, res) {
   if (req.method !== "POST" && req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
@@ -774,97 +712,83 @@ export default async function handler(req, res) {
   if (req.method === "GET") {
     const quota = readQuota(req);
     writeQuota(res, quota);
-    return res.status(200).json({
-      quota: quotaSummary(quota),
-      providers: {
-        mistral: Boolean(process.env.MISTRAL_API_KEY),
-        nvidia: Boolean(process.env.NVIDIA_API_KEY),
-        groq: Boolean(process.env.GROQ_API_KEY),
-        gemini: Boolean(process.env.GEMINI_API_KEY),
-        openrouter: Boolean(process.env.OPENROUTER_API_KEY),
-        webSearch: Boolean(process.env.TAVILY_API_KEY)
-      }
-    });
+    return res.status(200).json({ quota: quotaSummary(quota), providers: providerFlags(), tiers: tiersForClient() });
   }
 
   const startedAt = Date.now();
   const body = req.body || {};
   const messages = normalizeMessages(body.messages);
   const last = messages[messages.length - 1];
-  if (!last || last.role !== "user") return res.status(400).json({ error: "Pesan user wajib ada." });
+  if (!last || last.role !== "user") return res.status(400).json({ error: "A user message is required." });
 
-  const choice = parseChoice(body.modelChoice || "auto::auto");
-  if (!choice) return res.status(400).json({ error: "Pilihan model tidak valid." });
-
+  const tierId = normalizeTier(body.effort);
+  const tier = TIERS[tierId];
   const hasImage = messages.some(m => Array.isArray(m.content) && m.content.some(p => p?.type === "image_url"));
-  const available = await listAvailableModels();
-  if (!available.length) return res.status(503).json({ error: "Belum ada API key model yang dipasang di Vercel (GROQ_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY / MISTRAL_API_KEY / NVIDIA_API_KEY)." });
-  const chosenModel = choice.model;
-  if (choice.provider === "auto") {
-    // Server memilih sendiri model paling lancar.
-  } else if (COMPAT_PROVIDERS[choice.provider]) {
-    if (!getCompatModels(choice.provider).some(m => m.id === chosenModel)) return res.status(400).json({ error: `Model ${COMPAT_PROVIDERS[choice.provider].label} tidak ada di daftar (cek env ${COMPAT_PROVIDERS[choice.provider].modelsEnv}).` });
-  } else if (choice.provider === "groq") {
-    if (!GROQ_ALLOWED.has(chosenModel)) return res.status(400).json({ error: "Model Groq tidak diizinkan." });
-  } else if (choice.provider === "gemini") {
-    if (!GEMINI_ALLOWED.has(chosenModel)) return res.status(400).json({ error: "Model Gemini tidak diizinkan." });
-  } else if (choice.provider === "openrouter") {
-    if (!isFreeId(chosenModel)) return res.status(400).json({ error: "Untuk menjaga biaya tetap aman, ZennNyx hanya mengizinkan model OpenRouter bertanda free." });
-    if (isNonChatModel(chosenModel)) return res.status(400).json({ error: "Model ini bukan model chat (khusus moderasi/embedding). Pilih model lain." });
-  } else {
-    return res.status(400).json({ error: "Provider model tidak dikenal." });
-  }
+  if (!anyProviderEnabled()) return res.status(503).json({ error: "No model provider is set up yet. Add NVIDIA_API_KEY, GROQ_API_KEY, GEMINI_API_KEY or OPENROUTER_API_KEY in Vercel, then redeploy." });
+  const candidates = await modelsForTier(tierId, { hasImage });
+  if (!candidates.length) return res.status(hasImage ? 400 : 503).json({ error: hasImage ? "None of the active models can read images. Send the message without the image." : "No models are available right now. Try again in a moment." });
   const clientHealth = sanitizeClientHealth(body.health);
-  const stickyValue = typeof body.stickyModel === "string" && /^(groq|gemini|openrouter|mistral|nvidia)::[\w.:/-]{1,140}$/.test(body.stickyModel) ? body.stickyModel : "";
-  const chain = buildChain(choice, available, hasImage, clientHealth, stickyValue);
-  if (!chain.length) return res.status(400).json({ error: "Tidak ada model aktif yang bisa membaca gambar. Kirim tanpa gambar atau pasang API key Gemini/Groq." });
+  const stickyValue = typeof body.stickyModel === "string" && /^(nvidia|openrouter|groq|gemini)::[\w.:/-]{1,140}$/.test(body.stickyModel) ? body.stickyModel : "";
+  const chain = buildChain(candidates, clientHealth, tierId, stickyValue);
 
   // Jatah dipotong sebelum search/provider dipanggil, supaya request over-limit tidak memakai kredit API.
   const quotaResult = takeDailyQuota(req, res);
-  if (!quotaResult.ok) return res.status(quotaResult.status).json({ error: quotaResult.error, quota: quotaResult.quota, rejected: true });
+  if (!quotaResult.ok) return res.status(quotaResult.status).json({ error: quotaResult.error, quota: quotaResult.quota, rejected: true, limitReached: Boolean(quotaResult.limitReached) });
 
-  const thinkHarder = body.thinkHarder === true;
   const searchMode = ["on", "off"].includes(body.webSearch) ? body.webSearch : "auto";
   const userQuery = extractCurrentUserText(messages);
   const prevHadWebsite = messages.some(m => m.role === "assistant" && typeof m.content === "string" && /```\s*html/i.test(m.content));
   const wantsCode = prevHadWebsite || /\b(buat|bikin|buatkan|buatin|build|create|website|web app|landing page|html|css|javascript|react|komponen|preview|pratinjau|aplikasi)\b/i.test(userQuery);
-  const opts = { thinkHarder, wantsCode };
   const continuity = buildContinuity(messages);
-  const wantsWeb = shouldSearchWeb(userQuery, { mode: searchMode, hasImage, isFollowUp: continuity.isFollowUp });
+  const wantsWeb = shouldSearchWeb(userQuery, { mode: searchMode, hasImage, isFollowUp: continuity.isFollowUp, policy: tier.search });
+  const ctx = { tier, tierId, wantsCode, maxTokens: wantsCode ? tier.codeTokens : tier.maxTokens, temperature: tier.temperature };
+
+  const ac = new AbortController();
+  res.on("close", () => { if (!res.writableEnded) ac.abort(); }); // browser menekan Stop / tab ditutup: hentikan request ke provider
+  let streaming = false;
+  const sse = (event, data) => {
+    if (res.writableEnded || res.destroyed) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    res.flush?.();
+  };
 
   try {
     const currentDate = currentDateJakarta();
     const webResult = wantsWeb ? await searchWeb(buildSearchQuery(messages)) : { used: false, sources: [] };
-    const promptFor = model => systemPrompt({ thinkHarder, currentDate, webSources: webResult.sources, wantsWeb, wantsCode, continuity: continuity.prompt }) + modelIdentity(model);
+    const promptFor = model => systemPrompt({ tier: tierId, currentDate, webSources: webResult.sources, wantsWeb, wantsCode, continuity: continuity.prompt }) + modelIdentity(model.id);
     const deadline = makeDeadline(startedAt);
 
-    const { reply, model: used, attempts, firstError } = await runWithAutoSwitch(chain, messages, promptFor, opts, deadline);
-    const failedFirst = attempts[0] && !attempts[0].ok ? chain.find(m => m.value === attempts[0].value) : null;
+    // Header SSE baru dikirim setelah token pertama ada, jadi kegagalan sebelum itu masih bisa dibalas JSON biasa dan jatah dikembalikan.
+    const sink = {
+      start({ model, fallbackFrom, fallbackReason }) {
+        streaming = true;
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+        res.setHeader("Cache-Control", "no-store, no-transform");
+        res.setHeader("X-Accel-Buffering", "no");
+        res.setHeader("Connection", "keep-alive");
+        res.flushHeaders?.();
+        sse("start", {
+          provider: model.provider, model: model.id, name: model.name, tier: tierId, fallbackFrom, fallbackReason,
+          sources: webResult.sources, webSearched: webResult.used,
+          searchError: wantsWeb && !webResult.used ? webResult.error || "Web search returned no sources." : undefined,
+          quota: quotaResult.quota, projectHint: wantsCode, hasImage
+        });
+      },
+      delta(t) { sse("delta", { t }); }
+    };
 
-    return res.status(200).json({
-      reply: String(reply).trim(),
-      provider: used.provider,
-      model: used.id,
-      fallbackFrom: failedFirst ? failedFirst.id : undefined,
-      fallbackReason: failedFirst && firstError ? String(firstError.message || "").slice(0, 300) : undefined,
-      attempts,
-      thinkHarder,
-      hasImage,
-      sources: webResult.sources,
-      webSearched: webResult.used,
-      searchError: wantsWeb && !webResult.used ? webResult.error || "Pencarian web tidak menghasilkan sumber." : undefined,
-      quota: quotaResult.quota,
-      projectHint: wantsCode
-    });
+    const result = await raceModels({ chain, messages, promptFor, ctx, deadline, signal: ac.signal, sink });
+    sse("done", { attempts: result.attempts, truncated: Boolean(result.truncated), elapsedMs: Date.now() - startedAt });
+    return res.end();
   } catch (error) {
+    if (error?.aborted) { try { if (!res.writableEnded) res.end(); } catch {} return; }
     const known = error instanceof UpstreamError;
     if (!known) console.error("chat handler failed:", error);
+    const message = known ? error.message : "Something went wrong on the server while contacting the model. Try again.";
+    if (streaming) { sse("error", { error: message }); return res.end(); }
     const quota = refundQuota(res, quotaResult.before);
-    return res.status(known ? Number(error.status) || 502 : 500).json({
-      error: known ? error.message : "Ada kendala di server saat menghubungi model AI. Coba kirim ulang.",
-      attempts: known ? error.attempts : undefined,
-      quota,
-      refunded: true
-    });
+    return res.status(known ? Number(error.status) || 502 : 500).json({ error: message, attempts: known ? error.attempts : undefined, quota, refunded: true });
   }
 }
+

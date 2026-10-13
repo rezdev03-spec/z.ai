@@ -1,10 +1,10 @@
 // Tes langsung ke provider (NVIDIA/Mistral/...) TANPA memotong kuota chat dan tanpa fallback ke model lain.
 // Aktif hanya kalau env DIAG_SECRET diisi. Pakai di browser:
-//   /api/diag?key=<DIAG_SECRET>                              -> daftar model yang bisa dites
-//   /api/diag?key=<DIAG_SECRET>&model=nvidia::deepseek-ai/deepseek-v4.1-flash
+//   /api/diag?key=<DIAG_SECRET>                              -> daftar model per tingkat Effort (fast/low/medium/high)
+//   /api/diag?key=<DIAG_SECRET>&model=nvidia::meta/llama-3.3-70b-instruct
 //   tambahan opsional: &wait=50 (batas tunggu detik, 5-55)  &tokens=256 (16-2048)  &prompt=teks
 import { timingSafeEqual } from "node:crypto";
-import { COMPAT_PROVIDERS, getCompatModels } from "../lib/models.js";
+import { TIER_IDS, PROVIDERS, providerBaseUrl, modelsForTier, cleanKey } from "../lib/models.js";
 import { streamChatCompletion, describeStall } from "../lib/stream.js";
 
 const clamp = (v, min, max, fallback) => Math.min(max, Math.max(min, Number(v) || fallback));
@@ -22,24 +22,25 @@ export default async function handler(req, res) {
   const q = req.query || {};
   if (!sameSecret(q.key, secret)) return res.status(401).json({ error: "key salah." });
 
-  const testable = [];
-  for (const [provider, cfg] of Object.entries(COMPAT_PROVIDERS)) {
-    if (!process.env[cfg.env]) continue;
-    for (const m of getCompatModels(provider)) testable.push(`${provider}::${m.id}`);
+  const byTier = {};
+  const testable = new Set();
+  for (const t of TIER_IDS) {
+    byTier[t] = (await modelsForTier(t)).map(m => m.value);
+    byTier[t].forEach(v => testable.add(v));
   }
   const choice = String(q.model || "");
-  if (!choice) return res.status(200).json({ info: "Tambahkan &model=<salah satu di bawah>", models: testable });
-  if (!testable.includes(choice)) return res.status(400).json({ error: "Model tidak ada / API key provider-nya belum dipasang.", models: testable });
+  if (!choice) return res.status(200).json({ info: "Tambahkan &model=<salah satu di bawah>", tiers: byTier });
+  if (!testable.has(choice)) return res.status(400).json({ error: "Model tidak ada / API key provider-nya belum dipasang.", tiers: byTier });
 
   const sep = choice.indexOf("::");
   const provider = choice.slice(0, sep);
   const model = choice.slice(sep + 2);
-  const cfg = COMPAT_PROVIDERS[provider];
+  const cfg = PROVIDERS[provider];
   const waitMs = clamp(q.wait, 5, 55, 45) * 1000;
-  const key = String(process.env[cfg.env] || "").trim().replace(/^["']+|["']+$/g, "").replace(/^Bearer\s+/i, "").trim();
+  const key = cleanKey(process.env[cfg.env]);
 
   const r = await streamChatCompletion({
-    url: `${cfg.baseUrl}/chat/completions`,
+    url: `${providerBaseUrl(provider)}/chat/completions`,
     headers: { Authorization: `Bearer ${key}` },
     body: {
       model,
