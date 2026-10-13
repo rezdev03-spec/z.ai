@@ -1,19 +1,19 @@
 <!doctype html>
-<html lang="id">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-  <meta name="color-scheme" content="light dark">
+  <meta name="color-scheme" content="dark light">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="manifest" href="/site.webmanifest">
-  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#faf9f5" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#141414" media="(prefers-color-scheme: dark)">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,400;0,700;1,400;1,700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap">
   <title>ZennNyx AI</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.19.0/dist/katex.min.css" integrity="sha384-3rdsX6e5mueWyoweR9NIVmtEsUkokpBT/0ALqKKIBMr9j4qhHkaIkAcGgsE6uVlp" crossorigin="anonymous">
@@ -23,161 +23,119 @@
   <script defer src="/script.js"></script>
 </head>
 <body>
-  <div class="app-shell">
-    <div id="sidebarScrim" class="sidebar-scrim" hidden></div>
-    <aside id="sidebar" class="sidebar">
-      <div class="sidebar-brand">
-        <span class="brand-mark" aria-hidden="true"><svg class="brand-glyph" viewBox="0 0 32 32" aria-hidden="true"><path d="M27.88 10.71A13.0 13.0 0 1 1 21.29 4.12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="25.19" cy="6.81" r="2.7" fill="currentColor"/><mask id="zn-moon"><rect width="32" height="32" fill="#fff"/><circle cx="19.4" cy="12.6" r="6.0" fill="#000"/></mask><circle cx="16" cy="16" r="7.2" fill="currentColor" mask="url(#zn-moon)"/></svg></span>
-        <div class="brand-copy"><strong>ZennNyx</strong></div>
-        <button id="sidebarCloseBtn" class="icon-plain sidebar-close" type="button" aria-label="Tutup menu">×</button>
-      </div>
-      <button id="newChatBtn" class="new-chat-btn" type="button">
-        <span aria-hidden="true">＋</span><span>Chat baru</span>
-      </button>
-      <div class="sidebar-hidden-data" hidden><span id="sidebarModelName"></span><span id="webStatus"></span></div>
-      <div class="sidebar-spacer"></div>
-      <div class="quota-card">
-        <div class="quota-card-head"><span>Pesan hari ini</span><strong id="quotaLabel">20 / 20</strong></div>
-        <div class="quota-track"><span id="quotaFill"></span></div>
-        <p id="quotaHint" hidden></p>
-      </div>
-      </aside>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="znx" viewBox="0 0 32 32"><path d="M16.00 14.00 L16.00 3.60M16.00 11.00 L9.20 4.20M16.00 14.00 L11.20 9.20 L4.40 9.20M16.00 11.00 L22.80 4.20M16.00 14.00 L20.80 9.20 L27.60 9.20M16.00 18.00 L16.00 28.40M16.00 21.00 L9.20 27.80M16.00 18.00 L11.20 22.80 L4.40 22.80M16.00 21.00 L22.80 27.80M16.00 18.00 L20.80 22.80 L27.60 22.80M14.00 16.00 L3.60 16.00M18.00 16.00 L28.40 16.00" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="butt" stroke-linejoin="miter"/><circle cx="9.20" cy="4.20" r="1.6" fill="currentColor"/><circle cx="4.40" cy="9.20" r="1.6" fill="currentColor"/><circle cx="22.80" cy="4.20" r="1.6" fill="currentColor"/><circle cx="27.60" cy="9.20" r="1.6" fill="currentColor"/><circle cx="9.20" cy="27.80" r="1.6" fill="currentColor"/><circle cx="4.40" cy="22.80" r="1.6" fill="currentColor"/><circle cx="22.80" cy="27.80" r="1.6" fill="currentColor"/><circle cx="27.60" cy="22.80" r="1.6" fill="currentColor"/><rect x="-1.50" y="-1.50" width="3.0" height="3.0" fill="currentColor" transform="translate(16.00 2.60) rotate(0)"/><rect x="-1.50" y="-1.50" width="3.0" height="3.0" fill="currentColor" transform="translate(16.00 29.40) rotate(0)"/><rect x="-1.50" y="-1.50" width="3.0" height="3.0" fill="currentColor" transform="translate(2.60 16.00) rotate(0)"/><rect x="-1.50" y="-1.50" width="3.0" height="3.0" fill="currentColor" transform="translate(29.40 16.00) rotate(0)"/><path d="M16.00 13.00 L19.00 16.00 L16.00 19.00 L13.00 16.00ZM14.80 16a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0 -2.4 0Z" fill="currentColor" fill-rule="evenodd"/></symbol></svg>
 
-    <main class="main-shell">
+  <div id="app" class="app">
+    <div id="scrim" class="scrim" hidden></div>
+
+    <aside id="sidebar" class="sidebar" aria-label="Menu">
+      <div class="side-top">
+        <div class="brand"><svg class="logo"><use href="#znx"/></svg><strong>ZennNyx</strong></div>
+        <button id="sideClose" class="icon-btn side-close" type="button" aria-label="Close menu"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </div>
+      <button id="newChatSide" class="side-new" type="button"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New chat</span></button>
+      <div class="side-label">Recents</div>
+      <nav id="recents" class="recents" aria-label="Recent chats"></nav>
+      <div class="usage" id="usageCard" aria-live="polite">
+        <div class="usage-row"><span>Usage limit</span><strong id="usagePct">0%</strong></div>
+        <div class="usage-track"><span id="usageFill"></span></div>
+        <small id="usageReset">Resets at 12:00 AM</small>
+      </div>
+      <div class="credit">Made by Zenn · <a href="https://www.tiktok.com/@zennlonevyn" target="_blank" rel="noopener noreferrer">@zennlonevyn</a></div>
+    </aside>
+
+    <main class="main">
       <header class="topbar">
-        <div class="topbar-leading">
-          <button id="menuBtn" class="icon-plain menu-toggle" type="button" aria-label="Buka menu">☰</button>
-          <div class="mobile-brand"><span class="brand-mark small" aria-hidden="true"><svg class="brand-glyph" viewBox="0 0 32 32" aria-hidden="true"><path d="M27.88 10.71A13.0 13.0 0 1 1 21.29 4.12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="25.19" cy="6.81" r="2.7" fill="currentColor"/><mask id="zn-moon2"><rect width="32" height="32" fill="#fff"/><circle cx="19.4" cy="12.6" r="6.0" fill="#000"/></mask><circle cx="16" cy="16" r="7.2" fill="currentColor" mask="url(#zn-moon2)"/></svg></span><strong>ZennNyx AI</strong></div>
-        </div>
-        <div class="model-state" hidden aria-hidden="true">
-          <label for="modelSelect">Model aktif</label>
-          <select id="modelSelect" aria-label="Model aktif"><option value="">Memuat model…</option></select>
-          <span id="modelProviderBadge">AI</span>
-        </div>
-        <div class="topbar-actions">
-          <button id="newChatTopBtn" class="icon-round-btn" type="button" aria-label="Chat baru" title="Chat baru"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg></button>
-        </div>
+        <button id="menuBtn" class="icon-btn" type="button" aria-label="Open menu"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h11M4 17h6"/></svg></button>
+        <div id="topTitle" class="top-title"></div>
+        <button id="newChatTop" class="icon-btn" type="button" aria-label="New chat" title="New chat"><svg viewBox="0 0 24 24"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg></button>
       </header>
 
-      <div class="workspace-tabs" role="tablist">
-        <button id="chatTab" class="workspace-tab active" type="button" role="tab" aria-selected="true">Obrolan</button>
-        <button id="previewTab" class="workspace-tab" type="button" role="tab" aria-selected="false" disabled>Pratinjau <span class="tab-dot"></span></button>
-        <div class="workspace-caption" id="workspaceCaption" hidden>RUANG KERJA PRIBADI</div>
+      <div class="tabs" id="tabs" hidden role="tablist">
+        <button id="chatTab" class="tab active" type="button" role="tab" aria-selected="true">Chat</button>
+        <button id="previewTab" class="tab" type="button" role="tab" aria-selected="false">Preview <i class="tab-dot"></i></button>
       </div>
 
-      <section id="chatView" class="view-pane">
-        <section id="chat" class="chat" aria-live="polite">
-
-        </section>
+      <section id="chatView" class="view">
+        <div id="scroller" class="scroller">
+          <div id="chat" class="chat" aria-live="polite"></div>
+        </div>
+        <button id="jumpBtn" class="jump" type="button" aria-label="Scroll to latest" hidden><svg viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></svg></button>
       </section>
       <template id="welcomeTemplate">
-      <div id="welcome" class="welcome">
-        <pre class="ascii-art" aria-hidden="true">
-               :+#%@@@@@%#=
-            .*@@%*=-...-=*- -##*.
-          .*@@+.           .@@@@@
-         :@@*      .        +@@@=
-        .@@-    .*@=            .=.
-        #@*    -@@@             *@#
-       .@@:   :@@@@.            :@@.
-       .@@    -@@@@%.            @@.
-       .@@:   :@@@@@@*-...:=.   :@@.
-        #@*    -@@@@@@@@@@@-    *@#
-        .@@-    .*@@@@@@@*.    -@@.
-         :@@*      .:-:.      *@@:
-          .*@@+.           .+@@*.
-            .*@@%*=-...-=*%@@*.
-               :+#%@@@@@%#+:
-
-
-##### ##### #   # #   #   #   # #   # #   #
-   #  #     ##  # ##  #   ##  #  # #   # # 
-  #   ###   # # # # # #   # # #   #     #  
- #    #     #  ## #  ##   #  ##   #    # # 
-##### ##### #   # #   #   #   #   #   #   #
-
-   ---------------[ A I ]---------------</pre>
-        <h1>Mau tanya apa hari ini?</h1>
-        <div class="suggestions">
-          <button type="button" data-prompt="Jelasin satu hal menarik yang lagi ramai dibahas minggu ini.">Info terbaru</button>
-          <button type="button" data-prompt="Bantu aku bikin landing page modern dengan HTML, CSS, dan JavaScript. Tampilkan preview-nya juga.">Bikin website</button>
-          <button type="button" data-prompt="Ajari aku cara menyelesaikan persamaan kuadrat, lengkap dengan langkah-langkahnya.">Belajar matematika</button>
-          <button type="button" data-prompt="Aku punya ide project, bantu aku pecah jadi langkah yang realistis.">Kembangkan ide</button>
-        </div>
-      </div>
+        <div id="welcome" class="welcome"><svg class="welcome-logo" aria-hidden="true"><use href="#znx"/></svg><h1 id="greeting">Hello</h1></div>
       </template>
 
-      <section id="previewView" class="preview-view" hidden>
-        <div class="preview-toolbar">
-          <div class="preview-title">
-            <strong id="previewTitle">Pratinjau proyek</strong>
-            <small id="previewMeta">Sandbox terisolasi · jangan masukkan rahasia ke kode yang diuji</small>
-          </div>
+      <section id="previewView" class="preview" hidden>
+        <div class="preview-bar">
+          <strong id="previewTitle">Website preview</strong>
           <div class="preview-actions">
-            <button id="refreshPreviewBtn" class="icon-tool" type="button" title="Muat ulang" aria-label="Muat ulang pratinjau"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.5-5.8M20 4v5h-5"/></svg></button>
-            <button id="copyProjectBtn" class="icon-tool" type="button" title="Salin kode HTML" aria-label="Salin kode HTML"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11"/><path d="M5 16V5a2 2 0 0 1 2-2h9"/></svg></button>
-            <button id="fullscreenBtn" class="icon-tool" type="button" title="Layar penuh" aria-label="Layar penuh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+            <button id="refreshPreviewBtn" class="icon-btn sm" type="button" aria-label="Reload preview" title="Reload"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.5-5.8M20 4v5h-5"/></svg></button>
+            <button id="copyProjectBtn" class="icon-btn sm" type="button" aria-label="Copy HTML" title="Copy HTML"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M5 16V5a2 2 0 0 1 2-2h9"/></svg></button>
+            <button id="fullscreenBtn" class="icon-btn sm" type="button" aria-label="Full screen" title="Full screen"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
           </div>
         </div>
-        <div id="previewFrameWrap" class="preview-frame-wrap">
-          <iframe id="previewFrame" title="Pratinjau hasil kode" sandbox="allow-scripts allow-forms allow-modals allow-popups" allow="fullscreen" referrerpolicy="no-referrer"></iframe>
+        <div id="previewFrameWrap" class="preview-frame">
+          <iframe id="previewFrame" title="Website preview" sandbox="allow-scripts allow-forms allow-modals allow-popups" allow="fullscreen" referrerpolicy="no-referrer"></iframe>
         </div>
       </section>
 
-      <div class="composer-wrap">
-        <div id="imagePreview" class="image-preview" hidden></div>
-        <div class="composer-shell">
-          <div class="composer-context">
-            <span id="composeMode" hidden>CHAT</span>
-            <span id="selectedModelLabel">Pilih model</span>
-            <span class="context-spacer"></span>
-            <span id="dailyComposerStatus" class="quota-inline">20 pesan tersisa hari ini</span>
-            <span id="composerHint" hidden>Enter baris baru · Ctrl+Enter kirim</span>
+      <div id="composerWrap" class="composer-wrap">
+        <div class="composer-card">
+          <div id="usageBanner" class="banner" hidden>
+            <div><strong id="bannerTitle">Limit reached</strong><small id="bannerSub">Resets at 12:00 AM</small></div>
           </div>
-          <form id="composer" class="composer">
-            <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
-            <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden>
-            <button id="attachBtn" class="composer-icon" type="button" aria-label="Lampiran" title="Lampiran">＋</button>
-            <button id="modelPickerBtn" class="composer-icon model-picker-trigger" type="button" aria-label="Pilih model AI" title="Pilih model AI" aria-expanded="false">
-              <span id="selectedModelIcon" class="model-picker-trigger-icon" aria-hidden="true"></span>
-              <svg class="model-picker-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m3 6 5 5 5-5"/></svg>
-            </button>
-            <textarea id="input" rows="1" maxlength="8000" placeholder="Tulis pesan…" autocomplete="off" enterkeyhint="enter" spellcheck="true"></textarea>
-            <button id="voiceBtn" class="composer-icon voice-btn" type="button" aria-label="Input suara" title="Input suara">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"/><path d="M19 11v1a7 7 0 0 1-14 0v-1M12 19v3M9 22h6"/></svg>
-            </button>
-            <button id="sendBtn" class="send-btn" type="submit" aria-label="Kirim pesan" title="Kirim pesan"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+          <div id="attachments" class="attachments" hidden></div>
+          <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+          <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden>
+          <input id="fileInput" type="file" accept=".txt,.md,.markdown,.csv,.tsv,.json,.xml,.yaml,.yml,.html,.htm,.css,.js,.mjs,.ts,.tsx,.jsx,.py,.java,.c,.cpp,.h,.cs,.go,.rs,.php,.rb,.sh,.sql,.log,.ini,.toml,text/*" hidden>
+          <form id="composer" class="composer" autocomplete="off">
+            <textarea id="input" rows="1" maxlength="8000" placeholder="Chat with ZennNyx…" enterkeyhint="enter" spellcheck="true"></textarea>
+            <div class="composer-row">
+              <button id="attachBtn" class="circle-btn" type="button" aria-label="Add to chat" title="Add to chat"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+              <button id="effortBtn" class="chip" type="button" aria-label="Choose effort" aria-haspopup="dialog"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6Z"/></svg><span id="effortLabel">Medium</span><svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+              <span class="grow"></span>
+              <button id="actionBtn" class="circle-btn primary" type="submit" aria-label="Voice input"><span class="ic ic-mic"><svg viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"/><path d="M19 11v1a7 7 0 0 1-14 0v-1M12 19v3M9 22h6"/></svg></span><span class="ic ic-send"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></span><span class="ic ic-stop"><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></svg></span></button>
+            </div>
           </form>
-
-        </div>
-        <div id="modelPickerPopover" class="model-picker-popover" hidden role="dialog" aria-label="Pilih model AI">
-          <div class="model-picker-heading">
-            <strong>Pilih model AI</strong>
-            
-          </div>
-          <div id="modelPickerList" class="model-picker-list"><div class="model-picker-empty">Memuat model…</div></div>
-        </div>
-        <div id="attachPopover" class="attach-popover" hidden role="menu" aria-label="Lampiran dan mode berpikir">
-          <button class="attach-menu-item" type="button" data-action="camera"><span class="menu-icon">▣</span><span><strong>Kamera</strong><small>Ambil foto sekarang</small></span></button>
-          <button class="attach-menu-item" type="button" data-action="photo"><span class="menu-icon">▧</span><span><strong>Foto</strong><small>Pilih dari galeri</small></span></button>
-          <button id="thinkMenuBtn" class="attach-menu-item" type="button" data-action="think" aria-pressed="false"><span class="menu-icon">∴</span><span><strong>Berpikir lebih dalam</strong><small>Jawaban lebih teliti, tapi lebih lama</small></span><span class="menu-check">✓</span></button>
-          <button id="webMenuBtn" class="attach-menu-item" type="button" data-action="web" aria-pressed="false"><span class="menu-icon">⌁</span><span><strong>Cari di internet</strong><small id="webMenuHint">Otomatis</small></span><span class="menu-check">✓</span></button>
         </div>
       </div>
     </main>
   </div>
 
-  <div id="introModal" class="intro-modal" role="dialog" aria-modal="true" aria-labelledby="introTitle" hidden>
+  <div id="sheetLayer" class="sheet-layer" hidden>
+    <div class="sheet-backdrop" data-close></div>
+
+    <section id="addSheet" class="sheet" role="dialog" aria-label="Add to chat" hidden>
+      <div class="grab"></div>
+      <header class="sheet-head"><button class="icon-btn" type="button" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button><h2>Add to chat</h2><span class="head-pad"></span></header>
+      <div class="tiles">
+        <button class="tile" type="button" data-act="camera"><span class="tile-ic"><svg viewBox="0 0 24 24"><path d="M4 8a2 2 0 0 1 2-2h1.5l1.3-2h6.4l1.3 2H18a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><circle cx="12" cy="13" r="3.5"/></svg></span><span>Camera</span></button>
+        <button class="tile" type="button" data-act="photo"><span class="tile-ic"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="m4 17 5-4.5 3.5 3 3-2.5 4.5 4"/></svg></span><span>Photos</span></button>
+        <button class="tile" type="button" data-act="file"><span class="tile-ic"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5M12 17v-6M9.5 13.5 12 11l2.5 2.5"/></svg></span><span>Files</span></button>
+      </div>
+      <div class="card-row">
+        <span class="row-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 3.9 5.6 3.9 9s-1.3 6.4-3.9 9c-2.6-2.6-3.9-5.6-3.9-9S9.4 5.6 12 3Z"/></svg></span>
+        <span class="row-copy"><strong>Web search</strong><small id="webHint">Looks things up when a question needs fresh info</small></span>
+        <button id="webToggle" class="switch" type="button" role="switch" aria-checked="true" aria-label="Web search"><i></i></button>
+      </div>
+    </section>
+
+    <section id="effortSheet" class="sheet" role="dialog" aria-label="Select effort" hidden>
+      <div class="grab"></div>
+      <header class="sheet-head"><button class="icon-btn" type="button" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button><h2>Effort</h2><span class="head-pad"></span></header>
+      <div id="effortList" class="opts" role="radiogroup" aria-label="Effort"></div>
+      <p class="sheet-note">Higher effort means more thorough responses, but takes longer and uses your limit faster.</p>
+    </section>
+  </div>
+
+  <div id="introModal" class="intro" role="dialog" aria-modal="true" aria-labelledby="introTitle" hidden>
     <div class="intro-backdrop" data-intro-close></div>
     <div class="intro-card">
-      <button id="introCloseX" class="intro-x" type="button" data-intro-close aria-label="Tutup">×</button>
-      <h2 id="introTitle">Halo, selamat datang di ZennNyx AI</h2>
-      <p>Asisten AI gratis buatan Zenn. Tanya apa saja, atau kirim foto untuk dibahas. Kalau satu model sedang sibuk, otomatis dialihkan ke model lain.</p>
-      <p class="intro-credit">Project ini dibuat oleh <strong>Zenn</strong>. Ikuti di TikTok: <a href="https://www.tiktok.com/@zennlonevyn" target="_blank" rel="noopener noreferrer">@zennlonevyn</a></p>
-      <div class="intro-footer">
-        <label class="intro-check"><input id="introDontShow" type="checkbox"><span>Jangan tampilkan lagi</span></label>
-        <button id="introCloseBtn" class="intro-close-btn" type="button" data-intro-close>Tutup</button>
-      </div>
+      <svg class="intro-logo" aria-hidden="true"><use href="#znx"/></svg>
+      <h2 id="introTitle">Welcome to ZennNyx AI</h2>
+      <p>A free AI assistant made by Zenn. Ask anything or send a photo. Pick an effort level next to the message box: Fast for quick answers, High when you want it thorough.</p>
+      <button id="introCloseBtn" class="intro-btn" type="button" data-intro-close>Get started</button>
     </div>
   </div>
 </body>

@@ -280,7 +280,7 @@ function renderBlocks(lines) {
         j++;
       }
       const code = lines.slice(i + 1, j).join("\n");
-      html += `<div class="code-wrap" data-code-lang="${escapeAttr(lang)}"><div class="code-heading"><span>${escapeHtml(lang || "code")}</span><button class="code-copy" type="button" data-copy-code="${encodeURIComponent(code)}">Salin kode</button></div><pre class="code-block"><code>${escapeHtml(code)}</code></pre></div>`;
+      html += `<div class="code-wrap" data-code-lang="${escapeAttr(lang)}"><div class="code-heading"><span>${escapeHtml(lang || "code")}</span><button class="code-copy" type="button" data-copy-code="${encodeURIComponent(code)}">Copy</button></div><pre class="code-block"><code>${escapeHtml(code)}</code></pre></div>`;
       i = j + 1;
       continue;
     }
