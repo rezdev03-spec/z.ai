@@ -1,6 +1,6 @@
 {
   "name": "zennnyx-ai",
-  "version": "10.0.0",
+  "version": "10.1.0",
   "private": true,
   "scripts": {
     "check": "node --check script.js && node --check markdown.js && node --check api/chat.js && node --check api/models.js && node --check api/diag.js && node --check lib/openrouter.js && node --check lib/models.js && node --check lib/stream.js"

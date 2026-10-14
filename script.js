@@ -11,7 +11,7 @@ const EFFORTS = [
   { id: "medium", label: "Medium", desc: "Balanced speed and quality", recommended: true },
   { id: "high", label: "High", desc: "Most thorough, takes longer" }
 ];
-const KEYS = { effort: "zennnyx_effort_v1", web: "zennnyx_web_v1", chats: "zennnyx_chats_v1", intro: "zennnyx_intro_seen_v1", health: "zennnyx_model_health_v1", debug: "zennnyx_debug" };
+const KEYS = { model: "zennnyx_model_pick_v1", effort: "zennnyx_effort_v1", web: "zennnyx_web_v1", chats: "zennnyx_chats_v1", intro: "zennnyx_intro_seen_v1", health: "zennnyx_model_health_v1", debug: "zennnyx_debug" };
 const DEBUG_UI = (() => { try { const q = new URLSearchParams(location.search).get("debug"); if (q === "1") localStorage.setItem(KEYS.debug, "1"); if (q === "0") localStorage.removeItem(KEYS.debug); return localStorage.getItem(KEYS.debug) === "1"; } catch { return false; } })();
 const store = {
   get(k, d = "") { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -21,6 +21,8 @@ const store = {
 let messages = [];            // riwayat untuk API: {role, content, sources?, display?, fileName?, hadImage?, model?}
 let chatId = null;
 let effort = EFFORTS.some(e => e.id === store.get(KEYS.effort)) ? store.get(KEYS.effort) : "medium";
+let modelPick = store.get(KEYS.model, "auto") || "auto";   // "auto" atau "provider::id"
+let modelList = [];
 let webOn = store.get(KEYS.web, "1") !== "0";
 let webAvailable = true;
 let busy = false, abortCtl = null, lastUserRow = null, lastUsedModel = "";
@@ -168,6 +170,7 @@ const nextReset = () => { const J = 7 * 3600e3, d = Math.floor((Date.now() + J) 
 
 /* ───────────── Scroll ───────────── */
 function atBottom() { return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 90; }
+function updateJump() { stick = atBottom(); $("jumpBtn").hidden = stick || !messages.length; }
 function scrollBottom(force) { if (force || stick) { scroller.scrollTop = scroller.scrollHeight; } }
 scroller.addEventListener("scroll", () => { stick = atBottom(); $("jumpBtn").hidden = stick || !messages.length; }, { passive: true });
 $("jumpBtn").addEventListener("click", () => { stick = true; scrollBottom(true); $("jumpBtn").hidden = true; });
@@ -210,8 +213,7 @@ function switchView(view) {
   $("chatTab").setAttribute("aria-selected", String(!isPreview)); $("previewTab").setAttribute("aria-selected", String(isPreview));
   if (isPreview) $("previewTab").classList.remove("fresh");
   if (!isPreview && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
-  if (!isPreview) requestAnimationFrame(() => scrollBottom(true));
-}
+  }
 function toggleFullscreen() {
   const el = $("previewFrameWrap");
   if (document.fullscreenElement || document.webkitFullscreenElement) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
@@ -229,10 +231,21 @@ function showWelcome() {
   $("greeting").textContent = greeting();
   $("topTitle").textContent = "";
 }
+/* ───────────── Image preview (lightbox) ───────────── */
+function openImage(src) {
+  const box = $("imgViewer"), img = $("imgViewerImg");
+  img.src = src; img.classList.remove("zoomed"); $("imgViewerScroll").scrollTo(0, 0);
+  box.hidden = false; document.body.classList.add("noscroll"); $("imgViewerClose").focus({ preventScroll: true });
+}
+function closeImage() { const box = $("imgViewer"); if (box.hidden) return; box.hidden = true; $("imgViewerImg").removeAttribute("src"); document.body.classList.remove("noscroll"); }
+$("imgViewerClose").addEventListener("click", closeImage);
+$("imgViewerScroll").addEventListener("click", e => { if (e.target === $("imgViewerScroll")) closeImage(); });
+$("imgViewerImg").addEventListener("click", e => { e.stopPropagation(); $("imgViewerImg").classList.toggle("zoomed"); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeImage(); });
 function addUserRow(text, { imageData = null, fileName = "", hadImage = false } = {}) {
   clearWelcome();
   const row = document.createElement("article"); row.className = "msg user";
-  if (imageData) { const img = document.createElement("img"); img.className = "msg-image"; img.src = imageData; img.alt = "Attached image"; row.appendChild(img); }
+  if (imageData) { const img = document.createElement("img"); img.className = "msg-image"; img.src = imageData; img.alt = "Attached image"; img.tabIndex = 0; img.setAttribute("role", "button"); img.title = "Tap to enlarge"; img.addEventListener("click", () => openImage(imageData)); img.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openImage(imageData); } }); row.appendChild(img); }
   else if (hadImage) { const c = document.createElement("div"); c.className = "chip-file"; c.innerHTML = icons.file + "<span>Image</span>"; row.appendChild(c); }
   if (fileName) { const c = document.createElement("div"); c.className = "chip-file"; c.innerHTML = icons.file; const s = document.createElement("span"); s.textContent = fileName; c.appendChild(s); row.appendChild(c); }
   if (text) { const b = document.createElement("div"); b.className = "bubble"; b.textContent = text; row.appendChild(b); }
@@ -272,7 +285,6 @@ function buildActions(row, content, { sources = [], webSearched = false, modelLa
         t.append(st, sm); a.appendChild(t); pop.appendChild(a);
       });
       row.appendChild(pop);
-      if (stick) scrollBottom(true);
     });
     src.dataset.sources = "1";
     const stack = document.createElement("span"); stack.className = "favicon-stack";
@@ -410,7 +422,7 @@ async function runRequest(entry, { fresh = true } = {}) {
   try {
     const res = await fetch("/api/chat", {
       method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", signal: abortCtl.signal,
-      body: JSON.stringify({ messages: prepareHistory(), effort, stickyModel: lastUsedModel, webSearch: webOn ? "auto" : "off", health: readHealth() })
+      body: JSON.stringify({ messages: prepareHistory(), effort, model: modelPick !== "auto" ? modelPick : undefined, stickyModel: lastUsedModel, webSearch: webOn ? "auto" : "off", health: readHealth() })
     });
     if (!(res.headers.get("content-type") || "").includes("text/event-stream")) {
       const data = await res.json().catch(() => ({}));
@@ -420,10 +432,14 @@ async function runRequest(entry, { fresh = true } = {}) {
     }
     await readSSE(res, (ev, data) => {
       if (ev === "start") {
+        const hadStick = stick;
         removeTyping(); startData = data; updateQuota(data.quota);
         const row = document.createElement("article"); row.className = "msg assistant";
         const answer = document.createElement("div"); answer.className = "answer streaming"; row.appendChild(answer); chat.appendChild(row);
         live = { row, answer, text: "", timer: 0, sources: data.sources || [], webSearched: Boolean(data.webSearched), ttft: Math.round(performance.now() - started) };
+        stick = false; // dari sini jawaban TIDAK menyeret layar ke bawah
+        if (hadStick && lastUserRow) { const d = lastUserRow.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 12; if (d > 0) scroller.scrollTop += d; }
+        updateJump();
       } else if (ev === "delta" && live) {
         live.text += data.t;
         if (!live.timer) live.timer = setTimeout(() => { live.timer = 0; paintLive(live); }, 60);
@@ -457,13 +473,14 @@ async function runRequest(entry, { fresh = true } = {}) {
 function retryLast(entry) { if (busy) return; runRequest(entry); }
 function paintLive(live) {
   live.answer.innerHTML = renderMarkdown(cleanText(live.text, live.sources, live.webSearched));
-  if (stick) scrollBottom(true);
+  updateJump(); // tidak ada auto-scroll: tombol "jump to bottom" muncul kalau jawaban sudah melewati layar
 }
 function finishLive(live, start, { truncated, stopped, elapsed, note }) {
   clearTimeout(live.timer);
   live.answer.classList.remove("streaming");
   const notes = [];
   if (truncated) notes.push("This answer was cut short. Tap Regenerate to try again.");
+  if (modelPick !== "auto" && start?.provider && start?.model && `${start.provider}::${start.model}` !== modelPick) notes.push(`${modelLabelOf(modelPick) || "The model you picked"} didn't respond, so ${start.name} answered instead.`);
   if (DEBUG_UI) notes.push(`${Math.round(elapsed)} ms total · first token ${live.ttft} ms${start?.fallbackFrom ? ` · switched from ${start.fallbackFrom}: ${start.fallbackReason || ""}` : ""}${note ? ` · ${note}` : ""}`);
   const modelLabel = [start?.name, start?.webSearched ? "web" : ""].filter(Boolean).join(" · ");
   fillAnswer(live.row, live.answer, live.text, { sources: live.sources, webSearched: live.webSearched, modelLabel, notes, isLast: true });
@@ -472,7 +489,7 @@ function finishLive(live, start, { truncated, stopped, elapsed, note }) {
   const project = extractProjectFiles(live.text);
   if (project) { registerProject(project); showToast("Website ready. Open the Preview tab."); }
   saveChat();
-  if (stick) scrollBottom(true);
+  updateJump();
 }
 function regenerate() {
   if (busy) return;
@@ -547,7 +564,7 @@ function newChat(force) {
 function renderAttachments() {
   const box = $("attachments"); box.replaceChildren();
   if (pendingImage) {
-    const a = document.createElement("div"); a.className = "att"; const img = document.createElement("img"); img.src = pendingImage; img.alt = "Selected image";
+    const a = document.createElement("div"); a.className = "att"; const img = document.createElement("img"); img.src = pendingImage; img.alt = "Selected image"; img.style.cursor = "zoom-in"; img.addEventListener("click", () => openImage(pendingImage));
     const x = document.createElement("button"); x.type = "button"; x.setAttribute("aria-label", "Remove image"); x.innerHTML = icons.close; x.addEventListener("click", () => { pendingImage = null; renderAttachments(); });
     a.append(img, x); box.appendChild(a);
   }
@@ -587,10 +604,10 @@ async function prepareFile(file) {
 /* ───────────── Sheet (Add to chat, Effort) ───────────── */
 function openSheet(id) {
   $("sheetLayer").hidden = false;
-  ["addSheet", "effortSheet"].forEach(s => ($(s).hidden = s !== id));
+  ["addSheet", "effortSheet", "modelSheet"].forEach(s => ($(s).hidden = s !== id));
   input.blur();
 }
-function closeSheets() { $("sheetLayer").hidden = true; ["addSheet", "effortSheet"].forEach(s => ($(s).hidden = true)); }
+function closeSheets() { $("sheetLayer").hidden = true; ["addSheet", "effortSheet", "modelSheet"].forEach(s => ($(s).hidden = true)); }
 function renderEffort() {
   $("effortLabel").textContent = EFFORTS.find(e => e.id === effort).label;
   const list = $("effortList"); list.replaceChildren();
@@ -603,6 +620,36 @@ function renderEffort() {
     b.addEventListener("click", () => { effort = e.id; store.set(KEYS.effort, effort); renderEffort(); setTimeout(closeSheets, 120); });
     list.appendChild(b);
   }
+}
+function modelLabelOf(value) { return modelList.find(m => m.value === value)?.name || ""; }
+function renderModel() {
+  if (modelPick !== "auto" && modelList.length && !modelList.some(m => m.value === modelPick)) { modelPick = "auto"; store.set(KEYS.model, "auto"); }
+  $("modelLabel").textContent = modelPick === "auto" ? "Auto" : (modelLabelOf(modelPick) || "Auto");
+  const list = $("modelList"); list.replaceChildren();
+  const add = (value, title, sub, badge) => {
+    const b = document.createElement("button"); b.type = "button"; b.className = "opt"; b.setAttribute("role", "radio"); b.setAttribute("aria-checked", String(value === modelPick));
+    b.innerHTML = `<span class="opt-copy"><span class="opt-title"></span><small></small></span><span class="opt-check">${icons.check}</span>`;
+    b.querySelector(".opt-title").textContent = title;
+    if (badge) { const g = document.createElement("span"); g.className = "badge"; g.textContent = badge; b.querySelector(".opt-title").appendChild(g); }
+    b.querySelector("small").textContent = sub;
+    b.addEventListener("click", () => { modelPick = value; store.set(KEYS.model, value); renderModel(); setTimeout(closeSheets, 120); });
+    list.appendChild(b);
+  };
+  add("auto", "Auto", "Picks the fastest working model for your effort level", "Recommended");
+  let group = "";
+  for (const m of modelList) {
+    if (m.providerLabel !== group) { group = m.providerLabel; const h = document.createElement("div"); h.className = "opt-group"; h.textContent = group; list.appendChild(h); }
+    add(m.value, m.name, [m.vision ? "Reads images" : "", m.reasoning ? "Thinks first" : ""].filter(Boolean).join(" · ") || "Text");
+  }
+  if (!modelList.length) { const p = document.createElement("p"); p.className = "sheet-note"; p.textContent = "Loading models…"; list.appendChild(p); }
+}
+async function loadModels() {
+  try {
+    const r = await fetch("/api/models", { cache: "no-store" });
+    const d = await r.json();
+    if (Array.isArray(d.models)) modelList = d.models;
+  } catch {}
+  renderModel();
 }
 function renderWeb() {
   const t = $("webToggle"); t.setAttribute("aria-checked", String(webOn && webAvailable)); t.disabled = !webAvailable;
@@ -650,9 +697,10 @@ input.addEventListener("paste", e => {
   const item = [...(e.clipboardData?.items || [])].find(x => x.type.startsWith("image/"));
   if (item && !busy) { const f = item.getAsFile(); if (f) { e.preventDefault(); prepareImage(f); } }
 });
-input.addEventListener("focus", () => { setTimeout(() => { stick = true; scrollBottom(true); }, 250); });
+input.addEventListener("focus", () => { setTimeout(() => { if (atBottom()) scrollBottom(true); }, 250); });
 $("attachBtn").addEventListener("click", () => openSheet("addSheet"));
 $("effortBtn").addEventListener("click", () => openSheet("effortSheet"));
+$("modelBtn").addEventListener("click", () => { openSheet("modelSheet"); if (!modelList.length) loadModels(); });
 $("sheetLayer").addEventListener("click", e => { if (e.target.closest("[data-close]")) closeSheets(); });
 document.querySelectorAll("#addSheet .tile").forEach(t => t.addEventListener("click", () => {
   const a = t.dataset.act;
@@ -683,7 +731,7 @@ addEventListener("load", () => hydrateMath(document));
 
 /* ───────────── Mulai ───────────── */
 async function boot() {
-  syncViewport(); showWelcome(); renderEffort(); renderWeb(); renderRecents(); autosize(); updateQuota({ limit: quota.limit, used: 0, resetAt: nextReset() });
+  syncViewport(); showWelcome(); renderEffort(); renderModel(); loadModels(); renderWeb(); renderRecents(); autosize(); updateQuota({ limit: quota.limit, used: 0, resetAt: nextReset() });
   try {
     const r = await fetch("/api/chat", { cache: "no-store", credentials: "same-origin" });
     const d = await r.json();

@@ -94,6 +94,7 @@
             <div class="composer-row">
               <button id="attachBtn" class="circle-btn" type="button" aria-label="Add to chat" title="Add to chat"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
               <button id="effortBtn" class="chip" type="button" aria-label="Choose effort" aria-haspopup="dialog"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6Z"/></svg><span id="effortLabel">Medium</span><svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+              <button id="modelBtn" class="chip chip-model" type="button" aria-label="Choose model" aria-haspopup="dialog"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg><span id="modelLabel">Auto</span><svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
               <span class="grow"></span>
               <button id="actionBtn" class="circle-btn primary" type="submit" aria-label="Voice input"><span class="ic ic-mic"><svg viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"/><path d="M19 11v1a7 7 0 0 1-14 0v-1M12 19v3M9 22h6"/></svg></span><span class="ic ic-send"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></span><span class="ic ic-stop"><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></svg></span></button>
             </div>
@@ -121,12 +122,24 @@
       </div>
     </section>
 
+    <section id="modelSheet" class="sheet" role="dialog" aria-label="Select model" hidden>
+      <div class="grab"></div>
+      <header class="sheet-head"><button class="icon-btn" type="button" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button><h2>Model</h2><span class="head-pad"></span></header>
+      <div id="modelList" class="opts" role="radiogroup" aria-label="Model"></div>
+      <p class="sheet-note">Auto chooses for you. If a model you picked fails, another one answers instead. Effort still controls length and speed.</p>
+    </section>
+
     <section id="effortSheet" class="sheet" role="dialog" aria-label="Select effort" hidden>
       <div class="grab"></div>
       <header class="sheet-head"><button class="icon-btn" type="button" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button><h2>Effort</h2><span class="head-pad"></span></header>
       <div id="effortList" class="opts" role="radiogroup" aria-label="Effort"></div>
       <p class="sheet-note">Higher effort means more thorough responses, but takes longer and uses your limit faster.</p>
     </section>
+  </div>
+
+  <div id="imgViewer" class="img-viewer" role="dialog" aria-modal="true" aria-label="Image preview" hidden>
+    <button id="imgViewerClose" class="img-viewer-close" type="button" aria-label="Close preview"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+    <div id="imgViewerScroll" class="img-viewer-scroll"><img id="imgViewerImg" alt="Image preview"></div>
   </div>
 
   <div id="introModal" class="intro" role="dialog" aria-modal="true" aria-labelledby="introTitle" hidden>
