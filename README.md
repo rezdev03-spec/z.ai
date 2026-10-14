@@ -22,6 +22,10 @@ Static HTML/CSS/JS client + Vercel serverless API. Providers: **NVIDIA NIM, Groq
 - **Model picker**: one **model chip** in the message box (shows the model name, e.g. "Auto"). Tapping it opens *Select model* like the Claude app: Auto + a few models, an **Effort** row (opens Fast/Low/Medium/High) and **More models** (full list by provider). *Auto* keeps the old behaviour; or pick a specific model (Gemini, Groq, NVIDIA, OpenRouter). A picked model is tried alone first (no racing against others), and if it fails another model from the effort level answers and a note says so. `/api/models` now also returns the live `models` list.
 - Why Gemini/GLM rarely answered: in *Auto* the ranking favours Groq (GPT-OSS) and NVIDIA first. Pick Gemini/GLM from the Model chip, or check `/api/models?debug=1` to see whether `GEMINI_API_KEY` is set and the ids exist in the live catalog.
 
+## What changed in v10.1.2 (OpenRouter)
+- OpenRouter no longer takes whatever free model has the biggest context (that picked code-only/tiny models like Cohere North Mini Code). It now uses a curated list of general chat models per effort level, checked against the live free catalog, plus up to 2 extras, plus `openrouter/free` (OpenRouter's own router) as the last fallback. Override with `OPENROUTER_FAST_MODELS`, `OPENROUTER_LOW_MODELS`, `OPENROUTER_MEDIUM_MODELS`, `OPENROUTER_HIGH_MODELS` (comma-separated ids).
+- A 403 from one model no longer disables all OpenRouter models; only a 401 (bad key) does. Errors now say what actually happened, including the privacy-settings case.
+
 ## Environment variables
 - `NVIDIA_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`: set any of them (more = better fallback).
 - `TAVILY_API_KEY`: live web search (optional).
