@@ -230,3 +230,11 @@ body.noscroll { overflow: hidden; }
 .img-viewer-scroll { position: absolute; inset: 0; overflow: auto; display: grid; place-items: center; padding: 64px 12px 24px; -webkit-overflow-scrolling: touch; }
 .img-viewer-scroll img { display: block; max-width: 100%; max-height: calc(100dvh - 90px); object-fit: contain; border-radius: 8px; cursor: zoom-in; touch-action: pinch-zoom pan-x pan-y; }
 .img-viewer-scroll img.zoomed { max-width: none; max-height: none; width: 220vw; cursor: zoom-out; }
+
+.chip-model { max-width: 190px; }
+.opts-rows { margin-top: 14px; }
+.opt.row { padding: 16px; }
+.opt.row .opt-title { font-weight: 500; }
+.row-value { color: var(--muted); font-size: 16px; }
+.row-chev { width: 18px; height: 18px; color: var(--muted); flex: none; }
+.opt.row[hidden] { display: none; }

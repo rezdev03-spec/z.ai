@@ -609,7 +609,7 @@ function openSheet(id) {
 }
 function closeSheets() { $("sheetLayer").hidden = true; ["addSheet", "effortSheet", "modelSheet"].forEach(s => ($(s).hidden = true)); }
 function renderEffort() {
-  $("effortLabel").textContent = EFFORTS.find(e => e.id === effort).label;
+  $("effortRowValue").textContent = EFFORTS.find(e => e.id === effort).label; renderModelChip();
   const list = $("effortList"); list.replaceChildren();
   for (const e of EFFORTS) {
     const b = document.createElement("button"); b.type = "button"; b.className = "opt"; b.setAttribute("role", "radio"); b.setAttribute("aria-checked", String(e.id === effort)); b.dataset.effort = e.id;
@@ -617,14 +617,29 @@ function renderEffort() {
     b.querySelector(".opt-title").textContent = e.label;
     if (e.recommended) { const g = document.createElement("span"); g.className = "badge"; g.textContent = "Recommended"; b.querySelector(".opt-title").appendChild(g); }
     b.querySelector("small").textContent = e.desc;
-    b.addEventListener("click", () => { effort = e.id; store.set(KEYS.effort, effort); renderEffort(); setTimeout(closeSheets, 120); });
+    b.addEventListener("click", () => { effort = e.id; store.set(KEYS.effort, effort); renderEffort(); setTimeout(() => openSheet("modelSheet"), 120); });
     list.appendChild(b);
   }
 }
 function modelLabelOf(value) { return modelList.find(m => m.value === value)?.name || ""; }
+let modelView = "main"; // "main": Auto + beberapa model + Effort + More models; "all": semua model
+function renderModelChip() { $("modelLabel").textContent = modelPick === "auto" ? "Auto" : (modelLabelOf(modelPick) || "Auto"); }
+function featuredModels() { // satu model teratas per penyedia (maks. 4), model terpilih selalu ikut tampil
+  const seen = new Set(), out = [];
+  for (const m of modelList) if (!seen.has(m.provider)) { seen.add(m.provider); out.push(m); }
+  const picked = modelList.find(m => m.value === modelPick);
+  if (picked && !out.includes(picked)) out.splice(Math.min(out.length, 3), 1, picked);
+  return out.slice(0, 4);
+}
 function renderModel() {
   if (modelPick !== "auto" && modelList.length && !modelList.some(m => m.value === modelPick)) { modelPick = "auto"; store.set(KEYS.model, "auto"); }
-  $("modelLabel").textContent = modelPick === "auto" ? "Auto" : (modelLabelOf(modelPick) || "Auto");
+  renderModelChip();
+  const all = modelView === "all";
+  $("modelTitle").textContent = all ? "All models" : "Select model";
+  $("modelMore").hidden = all; $("modelNote").hidden = all;
+  $("modelClose").innerHTML = all ? '<svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>' : icons.close;
+  $("modelClose").setAttribute("aria-label", all ? "Back" : "Close");
+  if (all) $("modelClose").removeAttribute("data-close"); else $("modelClose").setAttribute("data-close", "");
   const list = $("modelList"); list.replaceChildren();
   const add = (value, title, sub, badge) => {
     const b = document.createElement("button"); b.type = "button"; b.className = "opt"; b.setAttribute("role", "radio"); b.setAttribute("aria-checked", String(value === modelPick));
@@ -635,12 +650,16 @@ function renderModel() {
     b.addEventListener("click", () => { modelPick = value; store.set(KEYS.model, value); renderModel(); setTimeout(closeSheets, 120); });
     list.appendChild(b);
   };
-  add("auto", "Auto", "Picks the fastest working model for your effort level", "Recommended");
-  let group = "";
-  for (const m of modelList) {
-    if (m.providerLabel !== group) { group = m.providerLabel; const h = document.createElement("div"); h.className = "opt-group"; h.textContent = group; list.appendChild(h); }
-    add(m.value, m.name, [m.vision ? "Reads images" : "", m.reasoning ? "Thinks first" : ""].filter(Boolean).join(" · ") || "Text");
-  }
+  const sub = m => [m.providerLabel, m.vision ? "reads images" : "", m.reasoning ? "thinks first" : ""].filter(Boolean).join(" · ");
+  add("auto", "Auto", "Fastest working model for your effort level", "Recommended");
+  if (all) {
+    let group = "";
+    for (const m of modelList) {
+      if (m.providerLabel !== group) { group = m.providerLabel; const h = document.createElement("div"); h.className = "opt-group"; h.textContent = group; list.appendChild(h); }
+      add(m.value, m.name, sub(m));
+    }
+  } else featuredModels().forEach(m => add(m.value, m.name, sub(m)));
+  $("moreModelsRow").hidden = modelList.length <= featuredModels().length;
   if (!modelList.length) { const p = document.createElement("p"); p.className = "sheet-note"; p.textContent = "Loading models…"; list.appendChild(p); }
 }
 async function loadModels() {
@@ -699,8 +718,10 @@ input.addEventListener("paste", e => {
 });
 input.addEventListener("focus", () => { setTimeout(() => { if (atBottom()) scrollBottom(true); }, 250); });
 $("attachBtn").addEventListener("click", () => openSheet("addSheet"));
-$("effortBtn").addEventListener("click", () => openSheet("effortSheet"));
-$("modelBtn").addEventListener("click", () => { openSheet("modelSheet"); if (!modelList.length) loadModels(); });
+$("modelBtn").addEventListener("click", () => { modelView = "main"; renderModel(); openSheet("modelSheet"); if (!modelList.length) loadModels(); });
+$("effortRow").addEventListener("click", () => openSheet("effortSheet"));
+$("moreModelsRow").addEventListener("click", () => { modelView = "all"; renderModel(); });
+$("modelClose").addEventListener("click", e => { if (modelView === "all") { e.stopPropagation(); modelView = "main"; renderModel(); } });
 $("sheetLayer").addEventListener("click", e => { if (e.target.closest("[data-close]")) closeSheets(); });
 document.querySelectorAll("#addSheet .tile").forEach(t => t.addEventListener("click", () => {
   const a = t.dataset.act;

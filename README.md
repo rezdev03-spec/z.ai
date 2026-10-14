@@ -19,7 +19,7 @@ Static HTML/CSS/JS client + Vercel serverless API. Providers: **NVIDIA NIM, Groq
 ## What changed in v10.1
 - **No auto-scroll**: the page no longer follows the answer while it streams or jumps to the bottom when it finishes. When you send a message, your question is placed at the top once; after that you read at your own pace. A "jump to bottom" button appears when the answer runs below the screen.
 - **Image preview**: tap any image you sent (or the thumbnail before sending) to open a full-screen viewer; tap the image to zoom in/out (scroll to pan), tap outside or press Esc to close.
-- **Model picker**: a new **Model** chip next to Effort. *Auto* keeps the old behaviour; or pick a specific model (Gemini, Groq, NVIDIA, OpenRouter). A picked model is tried alone first (no racing against others), and if it fails another model from the effort level answers and a note says so. `/api/models` now also returns the live `models` list.
+- **Model picker**: one **model chip** in the message box (shows the model name, e.g. "Auto"). Tapping it opens *Select model* like the Claude app: Auto + a few models, an **Effort** row (opens Fast/Low/Medium/High) and **More models** (full list by provider). *Auto* keeps the old behaviour; or pick a specific model (Gemini, Groq, NVIDIA, OpenRouter). A picked model is tried alone first (no racing against others), and if it fails another model from the effort level answers and a note says so. `/api/models` now also returns the live `models` list.
 - Why Gemini/GLM rarely answered: in *Auto* the ranking favours Groq (GPT-OSS) and NVIDIA first. Pick Gemini/GLM from the Model chip, or check `/api/models?debug=1` to see whether `GEMINI_API_KEY` is set and the ids exist in the live catalog.
 
 ## Environment variables
