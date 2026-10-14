@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { streamChatCompletion, describeStall } from "../lib/stream.js";
-import { TIERS, normalizeTier, PROVIDERS, providerBaseUrl, providerEnabled, anyProviderEnabled, modelsForTier, cleanKey, tiersForClient } from "../lib/models.js";
+import { TIERS, normalizeTier, PROVIDERS, providerBaseUrl, providerEnabled, anyProviderEnabled, modelsForTier, allModels, cleanKey, tiersForClient } from "../lib/models.js";
 
 const clampInt = (v, d, min, max) => { const n = Math.floor(Number(v)); return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : d; };
 // Batas pesan per hari per browser (ganti lewat env DAILY_LIMIT tanpa edit kode). UI hanya menampilkan persentase + jam reset.
@@ -624,7 +624,7 @@ function raceModels({ chain, messages, promptFor, ctx, deadline, signal, sink })
     };
     function armHedge() {
       clearTimeout(hedgeTimer);
-      if (settled || winner) return;
+      if (settled || winner || ctx.pinned) return;
       hedgeTimer = setTimeout(() => {
         if (settled || winner) return;
         if (running.size < 3 && launch()) return;
@@ -729,7 +729,14 @@ export default async function handler(req, res) {
   if (!candidates.length) return res.status(hasImage ? 400 : 503).json({ error: hasImage ? "None of the active models can read images. Send the message without the image." : "No models are available right now. Try again in a moment." });
   const clientHealth = sanitizeClientHealth(body.health);
   const stickyValue = typeof body.stickyModel === "string" && /^(nvidia|openrouter|groq|gemini)::[\w.:/-]{1,140}$/.test(body.stickyModel) ? body.stickyModel : "";
-  const chain = buildChain(candidates, clientHealth, tierId, stickyValue);
+  let chain = buildChain(candidates, clientHealth, tierId, stickyValue);
+  // Model pilihan manual: dicoba lebih dulu dan TIDAK dibalap model lain; baru kalau gagal, model lain dari tingkat ini jadi cadangan.
+  const pickedValue = typeof body.model === "string" && /^(nvidia|openrouter|groq|gemini)::[\w.:/-]{1,140}$/.test(body.model) ? body.model : "";
+  let pinned = false;
+  if (pickedValue) {
+    const picked = (await allModels({ hasImage })).find(m => m.value === pickedValue);
+    if (picked) { chain = [picked, ...chain.filter(m => m.value !== pickedValue)]; pinned = true; }
+  }
 
   // Jatah dipotong sebelum search/provider dipanggil, supaya request over-limit tidak memakai kredit API.
   const quotaResult = takeDailyQuota(req, res);
@@ -741,7 +748,7 @@ export default async function handler(req, res) {
   const wantsCode = prevHadWebsite || /\b(buat|bikin|buatkan|buatin|build|create|website|web app|landing page|html|css|javascript|react|komponen|preview|pratinjau|aplikasi)\b/i.test(userQuery);
   const continuity = buildContinuity(messages);
   const wantsWeb = shouldSearchWeb(userQuery, { mode: searchMode, hasImage, isFollowUp: continuity.isFollowUp, policy: tier.search });
-  const ctx = { tier, tierId, wantsCode, maxTokens: wantsCode ? tier.codeTokens : tier.maxTokens, temperature: tier.temperature };
+  const ctx = { tier, tierId, pinned, wantsCode, maxTokens: wantsCode ? tier.codeTokens : tier.maxTokens, temperature: tier.temperature };
 
   const ac = new AbortController();
   res.on("close", () => { if (!res.writableEnded) ac.abort(); }); // browser menekan Stop / tab ditutup: hentikan request ke provider

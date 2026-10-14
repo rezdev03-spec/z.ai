@@ -1,4 +1,4 @@
-import { TIER_IDS, modelsForTier, providerEnabled, tiersForClient } from "../lib/models.js";
+import { TIER_IDS, modelsForTier, modelsForClient, providerEnabled, tiersForClient } from "../lib/models.js";
 
 // Daftar tingkat Effort + provider yang aktif. Tambah ?debug=1 untuk melihat model yang dipakai tiap tingkat (urutan awal).
 export default async function handler(req, res) {
@@ -6,6 +6,7 @@ export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   const out = {
     tiers: tiersForClient(),
+    models: await modelsForClient().catch(() => []),
     providers: { nvidia: providerEnabled("nvidia"), openrouter: providerEnabled("openrouter"), groq: providerEnabled("groq"), gemini: providerEnabled("gemini"), webSearch: Boolean(process.env.TAVILY_API_KEY) }
   };
   if (req.query?.debug === "1") {
