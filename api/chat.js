@@ -457,7 +457,11 @@ function upstreamMessage(data) {
 function upstreamFail(label, status, data) {
   const detail = upstreamMessage(data);
   let message, httpStatus = 502, fatal = false, globalLimit = false;
-  if (status === 401 || status === 403) { message = `${label}: API key rejected or no access to this model.`; fatal = true; }
+  if (label === "OpenRouter" && /data policy|privacy|guardrail/i.test(detail) && (status === 404 || status === 403 || status === 400)) {
+    message = "OpenRouter: this free model is blocked by your OpenRouter privacy settings. Open openrouter.ai/settings/privacy and allow free endpoints (the ones that may train on inputs), then try again.";
+  }
+  else if (status === 401) { message = `${label}: API key rejected. Check the key in your environment variables.`; fatal = true; }
+  else if (status === 403) message = `${label}: access to this model was denied.`;
   else if (status === 402) { message = `${label}: not enough credit for this model.`; fatal = true; }
   else if (status === 410) message = `${label}: this model has been retired by the provider.`;
   else if (status === 404) message = `${label}: model not found or has no active endpoint.`;
