@@ -26,6 +26,11 @@ Static HTML/CSS/JS client + Vercel serverless API. Providers: **NVIDIA NIM, Groq
 - OpenRouter no longer takes whatever free model has the biggest context (that picked code-only/tiny models like Cohere North Mini Code). It now uses a curated list of general chat models per effort level, checked against the live free catalog, plus up to 2 extras, plus `openrouter/free` (OpenRouter's own router) as the last fallback. Override with `OPENROUTER_FAST_MODELS`, `OPENROUTER_LOW_MODELS`, `OPENROUTER_MEDIUM_MODELS`, `OPENROUTER_HIGH_MODELS` (comma-separated ids).
 - A 403 from one model no longer disables all OpenRouter models; only a 401 (bad key) does. Errors now say what actually happened, including the privacy-settings case.
 
+## What changed in v10.1.3
+- **Gemini 3.5 Flash** (`gemini-3.5-flash`, Google AI Studio) is now first for Low / Medium / High; Flash-Lite leads Fast. Gemini's starting priority is a bit above Groq, so Auto tries it first.
+- **Qwen 3.8 27B on Groq** (`qwen/qwen3.8-27b`) is first on Groq for Low / Medium. Fast still starts with GPT-OSS 20B because Qwen can "think" first.
+- Ids missing from your account's live catalog are dropped silently. Check `/api/models?debug=1`, or pin ids with `GEMINI_MEDIUM_MODELS=gemini-3.5-flash` / `GROQ_LOW_MODELS=qwen/qwen3.8-27b`.
+
 ## Environment variables
 - `NVIDIA_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`: set any of them (more = better fallback).
 - `TAVILY_API_KEY`: live web search (optional).
